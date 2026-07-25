@@ -1,0 +1,55 @@
+paths:
+  input: /workspace/input
+  processing: /workspace/processing
+  output: /workspace/output
+  archive: /workspace/archive
+  failed: /workspace/failed
+  logs: /workspace/logs
+  temp: /workspace/processing/temp
+
+watcher:
+  scan_interval_seconds: 5
+  stable_check_interval_seconds: 5
+  stable_required_checks: 3
+  minimum_file_age_seconds: 10
+
+model:
+  name: kotoba-tech/kotoba-whisper-v2.2
+  revision: null
+  device: cuda:0
+  dtype: float16
+  attention_implementation: sdpa
+
+inference:
+  language: japanese
+  chunk_length_s: 15
+  batch_size: 8
+  return_timestamps: true
+  word_timestamps: false
+  punctuation: true
+  fallback_batch_sizes:
+    - 4
+    - 2
+    - 1
+
+output:
+  write_srt: true
+  write_txt: true
+  write_raw_json: true
+  write_process_json: true
+  utf8_bom: false
+  overwrite_existing: false
+
+validation:
+  enabled: true
+  minimum_coverage_ratio: 0.70
+  maximum_uncovered_tail_seconds: 300
+  suspicious_result_destination: failed
+
+recovery:
+  retry_processing_files_on_start: true
+  maximum_attempts: 3
+
+logging:
+  level: INFO
+  keep_days: 30

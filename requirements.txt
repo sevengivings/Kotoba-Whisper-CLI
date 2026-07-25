@@ -1,0 +1,10 @@
+transformers==4.46.3
+accelerate==1.1.1
+punctuators==0.0.5
+watchdog==6.0.0
+PyYAML==6.0.2
+huggingface-hub==0.26.5
+safetensors==0.4.5
+sentencepiece==0.2.0
+protobuf==5.29.1
+pytest==8.3.4

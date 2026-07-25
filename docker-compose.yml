@@ -1,0 +1,28 @@
+services:
+  kotoba-folder-watcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kotoba-folder-watcher:2.2
+    container_name: kotoba-folder-watcher
+    restart: unless-stopped
+    gpus: all
+    environment:
+      HF_HOME: /models
+      HUGGINGFACE_HUB_CACHE: /models/hub
+      TRANSFORMERS_CACHE: /models/transformers
+      TOKENIZERS_PARALLELISM: "false"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      PYTHONUNBUFFERED: "1"
+      TZ: Asia/Seoul
+    volumes:
+      - ./input:/workspace/input
+      - ./processing:/workspace/processing
+      - ./output:/workspace/output
+      - ./archive:/workspace/archive
+      - ./failed:/workspace/failed
+      - ./logs:/workspace/logs
+      - ./models:/models
+      - ./config:/workspace/config:ro
+
