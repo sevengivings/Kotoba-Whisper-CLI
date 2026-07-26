@@ -1,171 +1,197 @@
-# Kotoba-Whisper V2.2 Windows 폴더 감시 자막 생성기
+# Kotoba-Whisper CLI
 
-Windows 11에서 `input` 폴더에 영상 또는 음성 파일을 넣으면 Docker 컨테이너 안에서 `kotoba-tech/kotoba-whisper-v2.2`로 일본어 음성을 전사하고 SRT/TXT/JSON 결과를 생성합니다. 호스트의 Python, PyTorch 환경은 사용하거나 변경하지 않습니다.
+Windows + Docker 환경에서 `input` 폴더에 넣은 영상/음성 파일을 `kotoba-tech/kotoba-whisper-v2.2`로 일본어 전사하고 SRT/TXT/JSON 결과를 생성하는 폴더 감시형 CLI입니다.
 
-## 필요 환경
+## 주요 기능
+
+- Docker 컨테이너 안에서 CUDA/GPU 기반 전사 실행
+- `input` 폴더 감시 후 안정화된 미디어 파일 자동 처리
+- 결과 파일 생성:
+  - `output/<name>.ja.srt`
+  - `output/<name>.ja.txt`
+  - `output/<name>.raw.json`
+  - `output/<name>.process.json`
+- 처리 완료 원본은 `archive`, 실패 원본은 `failed`로 이동
+- VAD/무음 기반 선분할로 긴 자막 뭉침 완화
+- 짧은 발화 보존을 위한 VAD padding/merge 설정
+- `ごめん。`, `ありがとうございました。` 같은 짧은 단독 hallucination 문구 필터링
+- word timestamp 시도 후 실패 시 segment timestamp로 자동 fallback
+
+## 실행 환경
 
 - Windows 11
-- Docker Desktop, WSL2 백엔드
-- NVIDIA GeForce RTX 3090 또는 CUDA 컨테이너를 실행할 수 있는 NVIDIA GPU
-- 최신 NVIDIA 드라이버
-- 권장 설치 위치: `C:\AI\kotoba-folder-watcher` 또는 `C:\Python\Kotoba-Whisper-CLI`
+- Docker Desktop + WSL2
+- NVIDIA GPU 및 최신 NVIDIA 드라이버
+- 권장 위치: `C:\Python\Kotoba-Whisper-CLI`
 
-경로에 공백이나 한글이 있어도 배치 파일은 가능한 범위에서 처리하지만, Docker/WSL 볼륨 문제를 줄이려면 짧은 영문 경로를 권장합니다.
-
-## 고정 버전
+고정 버전:
 
 - CUDA 이미지: `nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04`
-- 컨테이너 Python: `3.11`
-- PyTorch: `torch==2.5.1`, `torchaudio==2.5.1`, CUDA 12.1 wheel
+- Python: `3.11`
+- PyTorch: `2.5.1`
 - Transformers: `4.46.3`
-- Accelerate: `1.1.1`
-- Punctuators: `0.0.5`
-- Watchdog: `6.0.0`
-- PyYAML: `6.0.2`
 
-선택 이유: Kotoba-Whisper V2.2 모델 카드는 Transformers 4.39 이상과 `punctuators==0.0.5`를 안내합니다. PyTorch 2.5.1은 공식 설치표에 CUDA 12.1 wheel 조합이 명시되어 있고, RTX 3090의 FP16 및 SDPA 추론에 적합합니다. NVIDIA CUDA 문서는 `latest` 태그 사용을 피하고 명시 태그를 쓰는 방향이므로 Docker 이미지도 고정했습니다. V2.2의 원격 커스텀 pipeline은 pyannote 화자 분리를 포함하므로, 이 프로그램은 화자 분리 제외 요구사항에 맞춰 표준 Transformers ASR pipeline으로 모델을 직접 로드하고 문장부호만 별도 후처리합니다.
-
-## GPU 확인
-
-명령 프롬프트에서 프로젝트 폴더로 이동한 뒤:
-
-```bat
-docker run --rm --gpus all nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 nvidia-smi
-```
-
-GPU 이름과 드라이버 정보가 출력되어야 합니다. 실패하면 Docker Desktop의 WSL2 백엔드, NVIDIA 드라이버, GPU 컨테이너 지원을 먼저 확인하세요.
-
-## 최초 실행
-
-```bat
-cd /d C:\Python\Kotoba-Whisper-CLI
-start.bat
-```
-
-PowerShell을 선호하면:
+## 시작
 
 ```powershell
 cd C:\Python\Kotoba-Whisper-CLI
+docker compose up -d
+```
+
+또는 제공 스크립트:
+
+```powershell
 .\start.ps1
 ```
 
-첫 실행에서는 Docker 이미지 빌드와 Hugging Face 모델 다운로드 때문에 시간이 걸립니다. 모델 캐시는 `models` 폴더에 유지되므로 컨테이너를 다시 빌드해도 다시 다운로드하지 않습니다.
+상태 확인:
+
+```powershell
+docker compose ps
+```
+
+로그 확인:
+
+```powershell
+docker logs --tail 50 kotoba-folder-watcher
+```
 
 ## 사용 방법
 
-1. `input` 폴더에 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 같은 파일을 복사합니다.
-2. 파일 크기가 약 15초 이상 안정화되면 처리를 시작합니다.
+1. `input` 폴더에 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 같은 파일을 넣습니다.
+2. 파일 크기와 수정 시간이 안정화되면 자동 처리됩니다.
 3. 처리 중 원본은 `processing`으로 이동합니다.
-4. 성공하면 원본은 `archive`, 실패하면 `failed`로 이동합니다.
+4. 성공 시 원본은 `archive`, 실패 시 원본과 failure JSON은 `failed`로 이동합니다.
 
-네트워크 드라이브나 다른 폴더의 파일을 직접 지정하려면 PowerShell에서 다음을 사용합니다.
+네트워크 드라이브나 다른 위치의 단일 파일을 처리하려면:
 
 ```powershell
-.\process-file.ps1 "Z:\Japanese\sample.mp4"
+.\process-file.ps1 "Y:\Best\sample.mp4"
 ```
 
 완료까지 기다리려면:
 
 ```powershell
-.\process-file.ps1 "\\NAS\Videos\Japanese\sample.mp4" -Wait
+.\process-file.ps1 "Y:\Best\sample.mp4" -Wait
 ```
 
-이 스크립트는 원본 파일을 삭제하거나 이동하지 않습니다. 처리 안정성을 위해 `.part` 파일로 로컬 `input`에 staging한 뒤 감시기가 처리하게 합니다.
+## 자막 분할 및 동기화 설정
 
-생성 파일:
+주요 설정은 [config/config.yaml](config/config.yaml)에 있습니다.
 
-- `output/sample.ja.srt`: 일본어 SRT
-- `output/sample.ja.txt`: 일본어 텍스트
-- `output/sample.raw.json`: 모델 원시 결과와 정리된 chunk
-- `output/sample.process.json`: 처리 시간, GPU, 배치 크기, 완주 검증 결과
+현재 기본 방향은 누락을 줄이는 쪽입니다.
 
-자막이 영상보다 빨리 뜨는 파일을 줄이기 위해 오디오 추출 시 `aresample=async=1:first_pts=0`을 적용합니다. 이 옵션은 MP4/MKV 안의 오디오 타임라인 공백을 WAV에 무음으로 보존해서, 대사 사이 긴 공백이 SRT 시간에도 반영되도록 돕습니다.
+```yaml
+inference:
+  return_timestamps: true
+  word_timestamps: true
+  silence_split: true
+  silence_threshold_db: -43dB
+  min_silence_duration_s: 0.7
+  min_subtitle_duration_s: 0.8
 
-## 로그와 중지
+  vad_pre_split: true
+  vad_max_segment_duration_s: 30
+  vad_min_speech_duration_s: 0.25
+  vad_padding_s: 0.4
+  vad_merge_gap_s: 2.0
 
-```bat
-logs.bat
-stop.bat
+  subtitle_merge_gap_s: 2.0
+  subtitle_max_merged_duration_s: 15.0
+  subtitle_max_merged_chars: 80
 ```
 
-PowerShell:
+설정 의미:
+
+- `silence_threshold_db`: 무음 판정 기준입니다. 값이 낮을수록 작은 소리도 발화로 잡습니다.
+  - `-35dB`: 명확한 발화 위주, 누락 가능성 높음
+  - `-40dB`: 중간값
+  - `-43dB`: 현재 권장값
+  - `-45dB`: 전화통화/작은 소리 보존에 유리하지만 오탐 가능성 증가
+- `vad_pre_split`: 전사 전에 발화 구간을 먼저 나누어 Whisper에 넣습니다.
+- `vad_min_speech_duration_s`: 짧은 발화도 버리지 않기 위한 최소 발화 길이입니다.
+- `vad_padding_s`: VAD 구간 앞뒤에 붙이는 여유 시간입니다.
+- `vad_merge_gap_s`: 가까운 발화 구간을 하나의 전사 조각으로 병합하는 간격입니다.
+- `subtitle_merge_gap_s`: 전사 후 가까운 자막 조각을 합치는 간격입니다.
+- `subtitle_max_merged_duration_s`: 병합된 자막의 최대 길이입니다.
+
+## 짧은 오탐 문구 필터
+
+VAD 임계값을 낮추면 작은 잡음이나 숨소리가 `ごめん。` 같은 문구로 잘못 전사되는 경우가 있습니다. 이를 줄이기 위해 짧은 단독 문구 필터가 있습니다.
+
+```yaml
+filter_short_repeated_phrases: true
+filtered_short_phrases:
+  - ごめん。
+  - すみません。
+  - ありがとうございました。
+filtered_short_phrase_max_duration_s: 4.2
+```
+
+이 필터는 문구가 단독 자막이고 지정된 시간 이하일 때만 제거합니다. 예를 들어 `ごめん、待って。`처럼 문장 안에 포함된 경우는 유지합니다.
+
+## Docker 적용 방법
+
+`config/config.yaml`만 수정한 경우에는 이미지 재빌드가 필요 없습니다. 컨테이너 재시작만 하면 됩니다.
 
 ```powershell
-.\logs.ps1
-.\status.ps1
-.\stop.ps1
+docker compose restart kotoba-folder-watcher
 ```
 
-로그 파일은 `logs/kotoba-folder-watcher.log`에 날짜별로 회전 저장됩니다.
+코드 파일(`app/*.py`)이나 `requirements.txt`, `Dockerfile`을 수정한 경우에는 이미지를 다시 빌드해야 합니다.
 
-## 설정 변경
-
-`config/config.yaml`에서 다음을 바꿀 수 있습니다.
-
-- `inference.batch_size`: 기본 8. GPU 메모리 부족 시 4, 2, 1로 자동 재시도합니다.
-- `watcher.*`: 파일 안정화 시간과 폴더 스캔 주기
-- `validation.*`: 마지막 자막 시간이 미디어 길이에 비해 너무 짧을 때 `suspicious_incomplete`로 처리하는 기준
-- `output.utf8_bom`: SRT/TXT에 UTF-8 BOM을 넣을지 여부
-
-설정을 바꾼 뒤:
-
-```bat
-docker compose restart
+```powershell
+docker compose build
+docker compose up -d
 ```
 
-## 실패 파일 처리
+상태 확인:
 
-실패한 원본은 `failed`로 이동하고, 실패 원인은 `failed/*.failure.json`에 저장됩니다. 실패 원인을 확인한 뒤 원본 파일을 다시 `input`에 넣으면 재처리됩니다.
-
-컨테이너가 처리 중 종료되면 다음 시작 때 `processing`에 남은 지원 미디어 파일을 다시 큐에 넣습니다.
-
-## 모델 캐시 삭제
-
-모델을 다시 다운로드하고 싶으면 컨테이너를 중지한 뒤 `models` 폴더 내용을 삭제하세요.
-
-```bat
-stop.bat
+```powershell
+docker compose ps
 ```
 
-그 다음 `models` 폴더 내부 파일을 삭제하고 `start.bat`을 다시 실행합니다.
+로그 확인:
 
-## 수동 단일 파일 전사
-
-컨테이너 실행 중 다음처럼 한 파일만 처리할 수도 있습니다.
-
-```bat
-docker compose run --rm kotoba-folder-watcher python3.11 -m app.main --config /workspace/config/config.yaml transcribe /workspace/input/sample.mp4
+```powershell
+docker logs --tail 80 kotoba-folder-watcher
 ```
+
+## 실패 파일과 재시도 카운터
+
+실패 시 원본은 `failed`로 이동하고 실패 원인은 `failed/*.failure.json`에 저장됩니다.
+
+같은 파일명이 여러 번 실패하면 `processing/.attempts.json`에 재시도 횟수가 쌓이며, `recovery.maximum_attempts`를 넘으면 즉시 실패 처리됩니다. 이 경우 다시 처리하려면:
+
+1. `processing/.attempts.json`에서 해당 파일명 항목을 제거합니다.
+2. `failed`에 있는 원본 파일을 `input`으로 다시 옮깁니다.
+
+예:
+
+```powershell
+Move-Item -LiteralPath "failed\ROYVR-023 [8K] - A.mp4" -Destination "input\ROYVR-023 [8K] - A.mp4"
+```
+
+파일명을 바꿔 다시 넣어도 새 작업으로 처리됩니다.
 
 ## 테스트
 
-호스트 Python을 변경하지 않으려면 Docker 안에서 실행하세요.
+Docker 환경에서 전체 테스트:
 
-```bat
-docker compose run --rm kotoba-folder-watcher pytest
+```powershell
+docker run --rm -v "${PWD}:/workspace" -w /workspace kotoba-folder-watcher:2.2 python3.11 -m pytest -q
 ```
 
-PowerShell:
+또는:
 
 ```powershell
 .\test.ps1
 ```
 
-로컬에 pytest/PyYAML만 있는 개발 환경이라면 다음도 가능합니다.
+## 자주 보는 문제
 
-```bat
-python -m pytest
-```
-
-## 문제 해결
-
-- `CUDA is not available`: Docker GPU 확인 명령이 성공하는지 먼저 확인하세요.
-- `GPU memory exhausted`: `config/config.yaml`의 `inference.batch_size`를 4 또는 2로 낮추세요.
-- 모델 다운로드 실패: 네트워크와 Hugging Face 접근 가능 여부를 확인하세요.
-- `suspicious_incomplete`: 결과 파일은 보존되지만 원본은 기본적으로 `failed`로 이동합니다. 긴 무음 엔딩이 있는 파일이면 `validation.maximum_uncovered_tail_seconds`를 늘리거나 `suspicious_result_destination`을 `archive`로 바꿀 수 있습니다.
-
-## 제한사항
-
-- 일본어 전사만 수행합니다.
-- 한국어 번역, DeepL, 로컬 LLM, 화자 분리, GUI, 웹 UI는 포함하지 않습니다.
-- GPU 전체 추론 검증은 실제 RTX 3090 Docker 환경에서 수행해야 합니다.
+- `CUDA is not available`: Docker GPU 설정, NVIDIA 드라이버, WSL2 GPU 지원을 확인하세요.
+- `GPU memory exhausted`: `inference.batch_size`를 낮추세요.
+- `Maximum attempts exceeded`: `processing/.attempts.json`의 해당 파일 항목을 초기화하세요.
+- 작은 소리 누락: `silence_threshold_db`를 더 낮추세요. 예: `-43dB`에서 `-45dB`.
+- 짧은 오탐 증가: `filtered_short_phrases`에 문구를 추가하거나 `filtered_short_phrase_max_duration_s`를 조정하세요.

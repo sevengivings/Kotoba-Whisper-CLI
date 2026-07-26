@@ -11,9 +11,24 @@ from pathlib import Path
 from typing import Any
 
 from app.config import AppConfig
-from app.media import extract_audio, is_supported_media, probe_duration_seconds
+from app.media import (
+    detect_silences,
+    extract_audio,
+    extract_audio_segment,
+    is_supported_media,
+    probe_duration_seconds,
+    speech_spans_from_silences,
+)
 from app.recovery import increment_attempt
-from app.subtitle import chunks_to_json, chunks_to_srt, chunks_to_txt, normalize_chunks
+from app.subtitle import (
+    chunks_to_json,
+    chunks_to_srt,
+    chunks_to_txt,
+    filter_short_repeated_phrases,
+    group_chunks_by_timing,
+    normalize_chunks,
+    split_chunks_on_silence,
+)
 from app.transcriber import KotobaTranscriber
 
 LOGGER = logging.getLogger(__name__)
@@ -70,9 +85,49 @@ class MediaProcessor:
             media_duration = probe_duration_seconds(processing_file)
             LOGGER.info("Audio extraction started: %s", processing_file.name)
             extract_audio(processing_file, wav_path)
-            transcription = self.transcriber.transcribe(str(wav_path))
-            raw_chunks = extract_raw_chunks(transcription.raw)
+            silences = []
+            if self.config.inference.silence_split or self.config.inference.vad_pre_split:
+                try:
+                    silences = detect_silences(
+                        wav_path,
+                        self.config.inference.silence_threshold_db,
+                        self.config.inference.min_silence_duration_s,
+                    )
+                except RuntimeError as exc:
+                    LOGGER.warning("Silence detection skipped: %s", exc)
+            silence_count = len(silences)
+            transcription, raw_chunks, segment_count = self._transcribe_audio(
+                wav_path,
+                media_duration,
+                silences,
+                job_id,
+            )
             chunks = normalize_chunks(raw_chunks)
+            if transcription.word_timestamps_used:
+                chunks = group_chunks_by_timing(
+                    chunks,
+                    self.config.inference.word_max_gap_s,
+                    self.config.inference.word_max_subtitle_duration_s,
+                    self.config.inference.word_max_subtitle_chars,
+                )
+            elif self.config.inference.silence_split and silences:
+                chunks = split_chunks_on_silence(
+                    chunks,
+                    silences,
+                    self.config.inference.min_subtitle_duration_s,
+                )
+            chunks = group_chunks_by_timing(
+                chunks,
+                self.config.inference.subtitle_merge_gap_s,
+                self.config.inference.subtitle_max_merged_duration_s,
+                self.config.inference.subtitle_max_merged_chars,
+            )
+            if self.config.inference.filter_short_repeated_phrases:
+                chunks = filter_short_repeated_phrases(
+                    chunks,
+                    self.config.inference.filtered_short_phrases,
+                    self.config.inference.filtered_short_phrase_max_duration_s,
+                )
             last_end = chunks[-1].end if chunks else 0.0
             validation_status = validate_completion(media_duration, last_end, self.config)
 
@@ -97,6 +152,12 @@ class MediaProcessor:
                 "torch_version": transcription.torch_version,
                 "torch_cuda_version": transcription.torch_cuda_version,
                 "batch_size_used": transcription.batch_size_used,
+                "word_timestamps_requested": self.config.inference.word_timestamps,
+                "word_timestamps_used": transcription.word_timestamps_used,
+                "silence_split": self.config.inference.silence_split,
+                "detected_silence_count": silence_count,
+                "vad_pre_split": self.config.inference.vad_pre_split,
+                "transcription_segment_count": segment_count,
                 "job_id": job_id,
             }
 
@@ -134,6 +195,49 @@ class MediaProcessor:
             except OSError:
                 LOGGER.warning("Could not remove temporary wav: %s", wav_path)
 
+    def _transcribe_audio(
+        self,
+        wav_path: Path,
+        media_duration: float | None,
+        silences: list[Any],
+        job_id: str,
+    ) -> tuple[Any, list[dict[str, Any]], int]:
+        if not self.config.inference.vad_pre_split or media_duration is None or not silences:
+            transcription = self.transcriber.transcribe(str(wav_path))
+            return transcription, extract_raw_chunks(transcription.raw), 1
+
+        spans = speech_spans_from_silences(
+            media_duration,
+            silences,
+            self.config.inference.vad_min_speech_duration_s,
+            self.config.inference.vad_max_segment_duration_s,
+            self.config.inference.vad_padding_s,
+            self.config.inference.vad_merge_gap_s,
+        )
+        if not spans:
+            transcription = self.transcriber.transcribe(str(wav_path))
+            return transcription, extract_raw_chunks(transcription.raw), 1
+
+        LOGGER.info("VAD pre-split transcription: segments=%s", len(spans))
+        all_chunks: list[dict[str, Any]] = []
+        last_transcription = None
+        for index, span in enumerate(spans, 1):
+            segment_path = self.config.paths.temp / f"{wav_path.stem}.{job_id}.{index:04d}.wav"
+            try:
+                extract_audio_segment(wav_path, segment_path, span.start, span.end)
+                last_transcription = self.transcriber.transcribe(str(segment_path))
+                all_chunks.extend(_offset_raw_chunks(extract_raw_chunks(last_transcription.raw), span.start))
+            finally:
+                try:
+                    segment_path.unlink(missing_ok=True)
+                except OSError:
+                    LOGGER.warning("Could not remove temporary segment wav: %s", segment_path)
+
+        if last_transcription is None:
+            last_transcription = self.transcriber.transcribe(str(wav_path))
+            return last_transcription, extract_raw_chunks(last_transcription.raw), 1
+        return last_transcription, all_chunks, len(spans)
+
     def _write_outputs(
         self,
         basename: str,
@@ -166,6 +270,35 @@ def extract_raw_chunks(raw: dict[str, Any]) -> list[dict[str, Any]]:
         if str(key).startswith("chunks") and isinstance(value, list):
             collected.extend(item for item in value if isinstance(item, dict))
     return collected
+
+
+def _offset_raw_chunks(raw_chunks: list[dict[str, Any]], offset_s: float) -> list[dict[str, Any]]:
+    offset_chunks: list[dict[str, Any]] = []
+    for chunk in raw_chunks:
+        timestamp = chunk.get("timestamp") or chunk.get("timestamps")
+        if timestamp is None:
+            continue
+        try:
+            start, end = _offset_timestamp(timestamp, offset_s)
+        except (TypeError, ValueError):
+            continue
+        copied = dict(chunk)
+        copied["timestamp"] = [start, end]
+        copied.pop("timestamps", None)
+        offset_chunks.append(copied)
+    return offset_chunks
+
+
+def _offset_timestamp(timestamp: Any, offset_s: float) -> tuple[float, float]:
+    if isinstance(timestamp, (list, tuple)) and len(timestamp) >= 2:
+        start = 0.0 if timestamp[0] is None else float(timestamp[0])
+        end = start if timestamp[1] is None else float(timestamp[1])
+        return start + offset_s, end + offset_s
+    if isinstance(timestamp, dict):
+        start = 0.0 if timestamp.get("start") is None else float(timestamp["start"])
+        end = start if timestamp.get("end") is None else float(timestamp["end"])
+        return start + offset_s, end + offset_s
+    raise ValueError(f"Unsupported timestamp format: {timestamp!r}")
 
 
 def validate_completion(media_duration: float | None, last_end: float, config: AppConfig) -> str:

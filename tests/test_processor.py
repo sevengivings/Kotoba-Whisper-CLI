@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.media import is_supported_media
-from app.processor import extract_raw_chunks, unique_destination, validate_completion, write_json_atomic
+from app.processor import _offset_raw_chunks, extract_raw_chunks, unique_destination, validate_completion, write_json_atomic
 from app.transcriber import batch_size_sequence
 
 
@@ -56,3 +56,17 @@ def test_extract_raw_chunks_from_speaker_keys() -> None:
     }
     assert len(extract_raw_chunks(raw)) == 2
 
+
+def test_offset_raw_chunks() -> None:
+    chunks = _offset_raw_chunks(
+        [
+            {"timestamp": [0, 1], "text": "A"},
+            {"timestamps": {"start": 2, "end": 3}, "text": "B"},
+        ],
+        10,
+    )
+
+    assert chunks == [
+        {"timestamp": [10.0, 11.0], "text": "A"},
+        {"timestamp": [12.0, 13.0], "text": "B"},
+    ]

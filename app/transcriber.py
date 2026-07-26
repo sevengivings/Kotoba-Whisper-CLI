@@ -16,6 +16,7 @@ class TranscriptionResult:
     device_name: str
     torch_version: str
     torch_cuda_version: str | None
+    word_timestamps_used: bool
 
 
 class KotobaTranscriber:
@@ -27,6 +28,7 @@ class KotobaTranscriber:
         self.torch_version = ""
         self.torch_cuda_version: str | None = None
         self._punctuator: Any | None = None
+        self._word_timestamps_available = config.inference.word_timestamps
 
     def load(self) -> None:
         import torch
@@ -42,11 +44,15 @@ class KotobaTranscriber:
         self.torch_cuda_version = torch.version.cuda
 
         dtype = torch.float16 if self.config.model.dtype == "float16" else torch.float32
+        attention_implementation = self.config.model.attention_implementation
+        if self.config.inference.word_timestamps:
+            attention_implementation = "eager"
         model_kwargs: dict[str, Any] = {
-            "attn_implementation": self.config.model.attention_implementation
+            "attn_implementation": attention_implementation
         }
 
         LOGGER.info("GPU detected: %s", self.device_name)
+        LOGGER.info("Attention implementation: %s", attention_implementation)
         LOGGER.info("Loading model without remote diarization pipeline: %s", self.config.model.name)
         processor = AutoProcessor.from_pretrained(
             self.config.model.name,
@@ -80,19 +86,28 @@ class KotobaTranscriber:
         ):
             try:
                 LOGGER.info("Transcription started: batch_size=%s", batch_size)
-                with self._torch.inference_mode():
-                    raw = self._pipe(
+                timestamp_mode: bool | str = (
+                    "word" if self._word_timestamps_available else self.config.inference.return_timestamps
+                )
+                word_timestamps_used = self._word_timestamps_available
+                try:
+                    raw = self._transcribe_with_timestamp_mode(wav_path, batch_size, timestamp_mode)
+                except IndexError as exc:
+                    if not self._word_timestamps_available:
+                        raise
+                    LOGGER.warning(
+                        "Word timestamps failed; retrying with segment timestamps: %s",
+                        exc,
+                    )
+                    self._word_timestamps_available = False
+                    word_timestamps_used = False
+                    raw = self._transcribe_with_timestamp_mode(
                         wav_path,
-                        chunk_length_s=self.config.inference.chunk_length_s,
-                        batch_size=batch_size,
-                        return_timestamps=self.config.inference.return_timestamps,
-                        generate_kwargs={
-                            "language": self.config.inference.language,
-                            "task": "transcribe",
-                        },
+                        batch_size,
+                        self.config.inference.return_timestamps,
                     )
                 raw = _json_safe(raw)
-                if self.config.inference.punctuation:
+                if self.config.inference.punctuation and not word_timestamps_used:
                     raw = self._apply_punctuation(raw)
                 return TranscriptionResult(
                     raw=raw,
@@ -100,6 +115,7 @@ class KotobaTranscriber:
                     device_name=self.device_name,
                     torch_version=self.torch_version,
                     torch_cuda_version=self.torch_cuda_version,
+                    word_timestamps_used=word_timestamps_used,
                 )
             except RuntimeError as exc:
                 if is_cuda_oom(exc):
@@ -108,6 +124,26 @@ class KotobaTranscriber:
                     continue
                 raise
         raise RuntimeError("GPU memory exhausted for all configured batch sizes")
+
+    def _transcribe_with_timestamp_mode(
+        self,
+        wav_path: str,
+        batch_size: int,
+        timestamp_mode: bool | str,
+    ) -> Any:
+        if self._pipe is None or self._torch is None:
+            raise RuntimeError("Transcriber is not loaded")
+        with self._torch.inference_mode():
+            return self._pipe(
+                wav_path,
+                chunk_length_s=self.config.inference.chunk_length_s,
+                batch_size=batch_size,
+                return_timestamps=timestamp_mode,
+                generate_kwargs={
+                    "language": self.config.inference.language,
+                    "task": "transcribe",
+                },
+            )
 
     def _apply_punctuation(self, raw: dict[str, Any]) -> dict[str, Any]:
         chunks = raw.get("chunks")

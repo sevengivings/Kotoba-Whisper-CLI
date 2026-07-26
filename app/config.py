@@ -43,6 +43,24 @@ class InferenceConfig:
     return_timestamps: bool
     word_timestamps: bool
     punctuation: bool
+    silence_split: bool
+    silence_threshold_db: str
+    min_silence_duration_s: float
+    min_subtitle_duration_s: float
+    word_max_gap_s: float
+    word_max_subtitle_duration_s: float
+    word_max_subtitle_chars: int
+    vad_pre_split: bool
+    vad_max_segment_duration_s: float
+    vad_min_speech_duration_s: float
+    vad_padding_s: float
+    vad_merge_gap_s: float
+    subtitle_merge_gap_s: float
+    subtitle_max_merged_duration_s: float
+    subtitle_max_merged_chars: int
+    filter_short_repeated_phrases: bool
+    filtered_short_phrases: list[str]
+    filtered_short_phrase_max_duration_s: float
     fallback_batch_sizes: list[int]
 
 
@@ -148,6 +166,28 @@ def load_config(config_path: Path) -> AppConfig:
                 return_timestamps=bool(_require(inference, "return_timestamps")),
                 word_timestamps=bool(_require(inference, "word_timestamps")),
                 punctuation=bool(inference.get("punctuation", True)),
+                silence_split=bool(inference.get("silence_split", True)),
+                silence_threshold_db=str(inference.get("silence_threshold_db", "-35dB")),
+                min_silence_duration_s=float(inference.get("min_silence_duration_s", 0.7)),
+                min_subtitle_duration_s=float(inference.get("min_subtitle_duration_s", 0.8)),
+                word_max_gap_s=float(inference.get("word_max_gap_s", 0.5)),
+                word_max_subtitle_duration_s=float(inference.get("word_max_subtitle_duration_s", 4.5)),
+                word_max_subtitle_chars=int(inference.get("word_max_subtitle_chars", 42)),
+                vad_pre_split=bool(inference.get("vad_pre_split", True)),
+                vad_max_segment_duration_s=float(inference.get("vad_max_segment_duration_s", 30.0)),
+                vad_min_speech_duration_s=float(inference.get("vad_min_speech_duration_s", 0.25)),
+                vad_padding_s=float(inference.get("vad_padding_s", 0.4)),
+                vad_merge_gap_s=float(inference.get("vad_merge_gap_s", 2.0)),
+                subtitle_merge_gap_s=float(inference.get("subtitle_merge_gap_s", 2.0)),
+                subtitle_max_merged_duration_s=float(inference.get("subtitle_max_merged_duration_s", 8.0)),
+                subtitle_max_merged_chars=int(inference.get("subtitle_max_merged_chars", 80)),
+                filter_short_repeated_phrases=bool(inference.get("filter_short_repeated_phrases", True)),
+                filtered_short_phrases=[
+                    str(v) for v in inference.get("filtered_short_phrases", ["\u3054\u3081\u3093\u3002"])
+                ],
+                filtered_short_phrase_max_duration_s=float(
+                    inference.get("filtered_short_phrase_max_duration_s", 1.6)
+                ),
                 fallback_batch_sizes=[int(v) for v in _require(inference, "fallback_batch_sizes")],
             ),
             output=OutputConfig(
@@ -185,6 +225,32 @@ def validate_config(config: AppConfig) -> None:
         raise ValueError("inference.batch_size must be >= 1")
     if not 0 < config.validation.minimum_coverage_ratio <= 1:
         raise ValueError("validation.minimum_coverage_ratio must be between 0 and 1")
+    if config.inference.min_silence_duration_s <= 0:
+        raise ValueError("inference.min_silence_duration_s must be > 0")
+    if config.inference.min_subtitle_duration_s <= 0:
+        raise ValueError("inference.min_subtitle_duration_s must be > 0")
+    if config.inference.word_max_gap_s <= 0:
+        raise ValueError("inference.word_max_gap_s must be > 0")
+    if config.inference.word_max_subtitle_duration_s <= 0:
+        raise ValueError("inference.word_max_subtitle_duration_s must be > 0")
+    if config.inference.word_max_subtitle_chars < 1:
+        raise ValueError("inference.word_max_subtitle_chars must be >= 1")
+    if config.inference.vad_max_segment_duration_s <= 0:
+        raise ValueError("inference.vad_max_segment_duration_s must be > 0")
+    if config.inference.vad_min_speech_duration_s <= 0:
+        raise ValueError("inference.vad_min_speech_duration_s must be > 0")
+    if config.inference.vad_padding_s < 0:
+        raise ValueError("inference.vad_padding_s must be >= 0")
+    if config.inference.vad_merge_gap_s < 0:
+        raise ValueError("inference.vad_merge_gap_s must be >= 0")
+    if config.inference.subtitle_merge_gap_s < 0:
+        raise ValueError("inference.subtitle_merge_gap_s must be >= 0")
+    if config.inference.subtitle_max_merged_duration_s <= 0:
+        raise ValueError("inference.subtitle_max_merged_duration_s must be > 0")
+    if config.inference.subtitle_max_merged_chars < 1:
+        raise ValueError("inference.subtitle_max_merged_chars must be >= 1")
+    if config.inference.filtered_short_phrase_max_duration_s <= 0:
+        raise ValueError("inference.filtered_short_phrase_max_duration_s must be > 0")
     if config.validation.suspicious_result_destination not in {"failed", "archive"}:
         raise ValueError("validation.suspicious_result_destination must be 'failed' or 'archive'")
     if config.model.device != "cuda:0":
