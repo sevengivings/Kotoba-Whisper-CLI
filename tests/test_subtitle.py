@@ -103,13 +103,17 @@ def test_filter_standalone_phrases_removes_exact_phrase_regardless_duration() ->
     chunks = [
         SubtitleChunk(0.0, 1.0, "\u3054\u3081\u3093\u3002"),
         SubtitleChunk(2.0, 5.0, "\u3054\u3081\u3093\u3002"),
-        SubtitleChunk(6.0, 7.0, "\u3054\u3081\u3093\u3001\u5f85\u3063\u3066\u3002"),
-        SubtitleChunk(8.0, 9.0, "\u306f\u3044\u3002"),
+        SubtitleChunk(6.0, 8.0, "\u3042\u308a\u304c\u3068\u3046\u3054\u3056\u3044\u307e\u3057\u305f\u3002"),
+        SubtitleChunk(9.0, 10.0, "\u3054\u3081\u3093\u3001\u5f85\u3063\u3066\u3002"),
+        SubtitleChunk(11.0, 12.0, "\u306f\u3044\u3002"),
     ]
 
-    filtered = filter_standalone_phrases(chunks, ["\u3054\u3081\u3093\u3002"])
+    filtered = filter_standalone_phrases(
+        chunks,
+        ["\u3054\u3081\u3093\u3002", "\u3042\u308a\u304c\u3068\u3046\u3054\u3056\u3044\u307e\u3057\u305f\u3002"],
+    )
 
-    assert filtered == chunks[2:]
+    assert filtered == chunks[3:]
 
 
 def test_filter_punctuation_only_chunks_removes_orphan_punctuation() -> None:

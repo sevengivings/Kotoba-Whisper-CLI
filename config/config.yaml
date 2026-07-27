@@ -49,10 +49,10 @@ inference:
   filter_short_repeated_phrases: true
   filtered_short_phrases:
     - すみません。
-    - ありがとうございました。
   filtered_short_phrase_max_duration_s: 1.6
   filtered_always_phrases:
     - ごめん。
+    - ありがとうございました。
   fallback_batch_sizes:
     - 4
     - 2

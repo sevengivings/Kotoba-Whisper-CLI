@@ -15,7 +15,7 @@ Windows + Docker 환경에서 `input` 폴더에 넣은 영상/음성 파일을 `
 - VAD/무음 기반 선분할로 긴 자막 뭉침 완화
 - 짧은 발화 보존을 위한 VAD padding/merge 설정
 - `ごめん。`, `ありがとうございました。` 같은 짧은 단독 hallucination 문구 필터링
-- `ごめん。`처럼 자주 오탐되는 단독 문구는 길이와 무관하게 제거
+- `ごめん。`, `ありがとうございました。`처럼 자주 오탐되는 단독 문구는 길이와 무관하게 제거
 - `.`, `。`, `、`, `??` 같은 구두점만 있는 자막 조각 제거
 - word timestamp 시도 후 실패 시 segment timestamp로 자동 fallback
 - word timestamp fallback 결과의 과도하게 긴 자막 표시 시간 자동 축소
@@ -137,10 +137,10 @@ VAD 임계값을 낮추면 작은 잡음이나 숨소리가 `ごめん。` 같�
 filter_short_repeated_phrases: true
 filtered_short_phrases:
   - すみません。
-  - ありがとうございました。
 filtered_short_phrase_max_duration_s: 1.6
 filtered_always_phrases:
   - ごめん。
+  - ありがとうございました。
 ```
 
 이 필터는 문구가 단독 자막이고 지정된 시간 이하일 때만 제거합니다. 예를 들어 `ごめん、待って。`처럼 문장 안에 포함된 경우는 유지합니다.
