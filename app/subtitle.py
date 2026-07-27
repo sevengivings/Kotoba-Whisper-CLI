@@ -109,6 +109,34 @@ def filter_short_repeated_phrases(
     return filtered
 
 
+def filter_punctuation_only_chunks(chunks: list[SubtitleChunk]) -> list[SubtitleChunk]:
+    return [chunk for chunk in chunks if not _is_punctuation_only(chunk.text)]
+
+
+def tighten_fallback_subtitle_durations(
+    chunks: list[SubtitleChunk],
+    min_duration_s: float,
+    max_duration_s: float,
+    chars_per_second: float,
+    padding_s: float,
+) -> list[SubtitleChunk]:
+    tightened: list[SubtitleChunk] = []
+    for chunk in chunks:
+        duration = chunk.end - chunk.start
+        target_duration = _fallback_target_duration(
+            chunk.text,
+            min_duration_s,
+            max_duration_s,
+            chars_per_second,
+            padding_s,
+        )
+        if duration <= target_duration:
+            tightened.append(chunk)
+            continue
+        tightened.append(SubtitleChunk(chunk.start, chunk.start + target_duration, chunk.text))
+    return tightened
+
+
 def split_chunks_on_silence(
     chunks: list[SubtitleChunk],
     silences: list[Any],
@@ -225,6 +253,23 @@ def _normalize_phrase(text: str) -> str:
     text = clean_text(text)
     text = re.sub(r"[\s\u3000]+", "", text)
     return text
+
+
+def _is_punctuation_only(text: str) -> bool:
+    text = re.sub(r"[\s\u3000]+", "", clean_text(text))
+    return bool(text) and not any(char.isalnum() for char in text)
+
+
+def _fallback_target_duration(
+    text: str,
+    min_duration_s: float,
+    max_duration_s: float,
+    chars_per_second: float,
+    padding_s: float,
+) -> float:
+    readable_chars = len(re.sub(r"[\s\u3000]+", "", clean_text(text)))
+    estimated = readable_chars / chars_per_second + padding_s
+    return max(min_duration_s, min(max_duration_s, estimated))
 
 
 def _parse_timestamp(timestamp: Any) -> tuple[float, float]:

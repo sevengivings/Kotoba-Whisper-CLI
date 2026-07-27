@@ -58,6 +58,9 @@ class InferenceConfig:
     subtitle_merge_gap_s: float
     subtitle_max_merged_duration_s: float
     subtitle_max_merged_chars: int
+    fallback_subtitle_max_duration_s: float
+    fallback_subtitle_chars_per_second: float
+    fallback_subtitle_padding_s: float
     filter_short_repeated_phrases: bool
     filtered_short_phrases: list[str]
     filtered_short_phrase_max_duration_s: float
@@ -181,6 +184,13 @@ def load_config(config_path: Path) -> AppConfig:
                 subtitle_merge_gap_s=float(inference.get("subtitle_merge_gap_s", 2.0)),
                 subtitle_max_merged_duration_s=float(inference.get("subtitle_max_merged_duration_s", 8.0)),
                 subtitle_max_merged_chars=int(inference.get("subtitle_max_merged_chars", 80)),
+                fallback_subtitle_max_duration_s=float(
+                    inference.get("fallback_subtitle_max_duration_s", 5.0)
+                ),
+                fallback_subtitle_chars_per_second=float(
+                    inference.get("fallback_subtitle_chars_per_second", 7.0)
+                ),
+                fallback_subtitle_padding_s=float(inference.get("fallback_subtitle_padding_s", 0.4)),
                 filter_short_repeated_phrases=bool(inference.get("filter_short_repeated_phrases", True)),
                 filtered_short_phrases=[
                     str(v) for v in inference.get("filtered_short_phrases", ["\u3054\u3081\u3093\u3002"])
@@ -249,6 +259,12 @@ def validate_config(config: AppConfig) -> None:
         raise ValueError("inference.subtitle_max_merged_duration_s must be > 0")
     if config.inference.subtitle_max_merged_chars < 1:
         raise ValueError("inference.subtitle_max_merged_chars must be >= 1")
+    if config.inference.fallback_subtitle_max_duration_s <= 0:
+        raise ValueError("inference.fallback_subtitle_max_duration_s must be > 0")
+    if config.inference.fallback_subtitle_chars_per_second <= 0:
+        raise ValueError("inference.fallback_subtitle_chars_per_second must be > 0")
+    if config.inference.fallback_subtitle_padding_s < 0:
+        raise ValueError("inference.fallback_subtitle_padding_s must be >= 0")
     if config.inference.filtered_short_phrase_max_duration_s <= 0:
         raise ValueError("inference.filtered_short_phrase_max_duration_s must be > 0")
     if config.validation.suspicious_result_destination not in {"failed", "archive"}:

@@ -4,11 +4,13 @@ from app.subtitle import (
     SubtitleChunk,
     chunks_to_srt,
     format_srt_time,
+    filter_punctuation_only_chunks,
     group_chunks_by_timing,
     filter_short_repeated_phrases,
     normalize_chunks,
     split_chunks_on_silence,
     split_text_for_spans,
+    tighten_fallback_subtitle_durations,
 )
 
 
@@ -93,6 +95,41 @@ def test_filter_short_repeated_phrases_removes_short_standalone_phrase() -> None
         (6.0, 7.0, "\u3054\u3081\u3093\u3001\u5f85\u3063\u3066\u3002"),
         (8.0, 9.0, "\u306f\u3044\u3002"),
     ]
+
+
+def test_filter_punctuation_only_chunks_removes_orphan_punctuation() -> None:
+    chunks = [
+        SubtitleChunk(0.0, 0.8, "."),
+        SubtitleChunk(1.0, 1.8, "\u3002"),
+        SubtitleChunk(2.0, 2.8, "??"),
+        SubtitleChunk(3.0, 3.8, "\u3001"),
+        SubtitleChunk(4.0, 5.0, "\u305d\u3046\u3002"),
+        SubtitleChunk(6.0, 7.0, "3\u304b\u6708"),
+    ]
+
+    filtered = filter_punctuation_only_chunks(chunks)
+
+    assert filtered == chunks[4:]
+
+
+def test_tighten_fallback_subtitle_durations_caps_short_text() -> None:
+    chunks = [
+        SubtitleChunk(10.0, 25.0, "\u3042\u308c\u3001\u9375\u958b\u3051\u3063\u3071\u3058\u3083\u3093\u3002"),
+        SubtitleChunk(30.0, 32.0, "\u9577\u3081\u306e\u6587\u7ae0\u306f\u305d\u306e\u307e\u307e\u3002"),
+    ]
+
+    tightened = tighten_fallback_subtitle_durations(
+        chunks,
+        min_duration_s=0.8,
+        max_duration_s=5.0,
+        chars_per_second=7.0,
+        padding_s=0.4,
+    )
+
+    assert tightened[0].start == 10.0
+    assert round(tightened[0].end, 3) == 12.114
+    assert tightened[0].text == chunks[0].text
+    assert tightened[1] == chunks[1]
 
 
 def test_group_chunks_by_timing_merges_unfinished_fragments() -> None:

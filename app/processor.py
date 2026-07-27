@@ -25,9 +25,11 @@ from app.subtitle import (
     chunks_to_srt,
     chunks_to_txt,
     filter_short_repeated_phrases,
+    filter_punctuation_only_chunks,
     group_chunks_by_timing,
     normalize_chunks,
     split_chunks_on_silence,
+    tighten_fallback_subtitle_durations,
 )
 from app.transcriber import KotobaTranscriber
 
@@ -122,12 +124,21 @@ class MediaProcessor:
                 self.config.inference.subtitle_max_merged_duration_s,
                 self.config.inference.subtitle_max_merged_chars,
             )
+            if not transcription.word_timestamps_used:
+                chunks = tighten_fallback_subtitle_durations(
+                    chunks,
+                    self.config.inference.min_subtitle_duration_s,
+                    self.config.inference.fallback_subtitle_max_duration_s,
+                    self.config.inference.fallback_subtitle_chars_per_second,
+                    self.config.inference.fallback_subtitle_padding_s,
+                )
             if self.config.inference.filter_short_repeated_phrases:
                 chunks = filter_short_repeated_phrases(
                     chunks,
                     self.config.inference.filtered_short_phrases,
                     self.config.inference.filtered_short_phrase_max_duration_s,
                 )
+            chunks = filter_punctuation_only_chunks(chunks)
             last_end = chunks[-1].end if chunks else 0.0
             validation_status = validate_completion(media_duration, last_end, self.config)
 
