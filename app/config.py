@@ -188,7 +188,7 @@ def load_config(config_path: Path) -> AppConfig:
                     inference.get("fallback_subtitle_max_duration_s", 5.0)
                 ),
                 fallback_subtitle_chars_per_second=float(
-                    inference.get("fallback_subtitle_chars_per_second", 7.0)
+                    inference.get("fallback_subtitle_chars_per_second", 5.0)
                 ),
                 fallback_subtitle_padding_s=float(inference.get("fallback_subtitle_padding_s", 0.4)),
                 filter_short_repeated_phrases=bool(inference.get("filter_short_repeated_phrases", True)),
