@@ -25,9 +25,11 @@ from app.subtitle import (
     chunks_to_srt,
     chunks_to_txt,
     filter_short_repeated_phrases,
+    filter_standalone_phrases,
     filter_punctuation_only_chunks,
     group_chunks_by_timing,
     normalize_chunks,
+    shift_subtitle_timings,
     split_chunks_on_silence,
     tighten_fallback_subtitle_durations,
 )
@@ -132,12 +134,20 @@ class MediaProcessor:
                     self.config.inference.fallback_subtitle_chars_per_second,
                     self.config.inference.fallback_subtitle_padding_s,
                 )
+                chunks = shift_subtitle_timings(
+                    chunks,
+                    self.config.inference.fallback_subtitle_start_delay_s,
+                )
             if self.config.inference.filter_short_repeated_phrases:
                 chunks = filter_short_repeated_phrases(
                     chunks,
                     self.config.inference.filtered_short_phrases,
                     self.config.inference.filtered_short_phrase_max_duration_s,
                 )
+            chunks = filter_standalone_phrases(
+                chunks,
+                self.config.inference.filtered_always_phrases,
+            )
             chunks = filter_punctuation_only_chunks(chunks)
             last_end = chunks[-1].end if chunks else 0.0
             validation_status = validate_completion(media_duration, last_end, self.config)

@@ -45,12 +45,14 @@ inference:
   fallback_subtitle_max_duration_s: 5.0
   fallback_subtitle_chars_per_second: 5.0
   fallback_subtitle_padding_s: 0.4
+  fallback_subtitle_start_delay_s: 0.5
   filter_short_repeated_phrases: true
   filtered_short_phrases:
-    - ごめん。
     - すみません。
     - ありがとうございました。
   filtered_short_phrase_max_duration_s: 1.6
+  filtered_always_phrases:
+    - ごめん。
   fallback_batch_sizes:
     - 4
     - 2

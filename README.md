@@ -15,6 +15,7 @@ Windows + Docker 환경에서 `input` 폴더에 넣은 영상/음성 파일을 `
 - VAD/무음 기반 선분할로 긴 자막 뭉침 완화
 - 짧은 발화 보존을 위한 VAD padding/merge 설정
 - `ごめん。`, `ありがとうございました。` 같은 짧은 단독 hallucination 문구 필터링
+- `ごめん。`처럼 자주 오탐되는 단독 문구는 길이와 무관하게 제거
 - `.`, `。`, `、`, `??` 같은 구두점만 있는 자막 조각 제거
 - word timestamp 시도 후 실패 시 segment timestamp로 자동 fallback
 - word timestamp fallback 결과의 과도하게 긴 자막 표시 시간 자동 축소
@@ -105,6 +106,7 @@ inference:
   fallback_subtitle_max_duration_s: 5.0
   fallback_subtitle_chars_per_second: 5.0
   fallback_subtitle_padding_s: 0.4
+  fallback_subtitle_start_delay_s: 0.5
 ```
 
 설정 의미:
@@ -123,8 +125,9 @@ inference:
 - `fallback_subtitle_max_duration_s`: word timestamp fallback 시 자막 한 줄의 최대 표시 시간입니다.
 - `fallback_subtitle_chars_per_second`: fallback 자막의 예상 읽기 속도입니다. 값이 낮을수록 더 오래 표시됩니다.
 - `fallback_subtitle_padding_s`: fallback 자막 표시 시간에 더하는 여유 시간입니다.
+- `fallback_subtitle_start_delay_s`: fallback 자막 전체를 뒤로 미는 시간입니다. VAD segment가 실제 발화보다 조금 일찍 시작할 때 보정합니다.
 
-word timestamp가 성공하면 단어 단위 시간으로 자막을 묶습니다. 실패하면 segment timestamp로 자동 fallback하며, 이때 짧은 문장이 10초 이상 떠 있는 문제를 줄이기 위해 문장 길이 기반으로 표시 시간을 줄입니다.
+word timestamp가 성공하면 단어 단위 시간으로 자막을 묶습니다. 실패하면 segment timestamp로 자동 fallback하며, 이때 짧은 문장이 10초 이상 떠 있는 문제를 줄이기 위해 문장 길이 기반으로 표시 시간을 줄이고 필요하면 시작 시간을 약간 늦춥니다.
 
 ## 짧은 오탐 문구 필터
 
@@ -133,13 +136,15 @@ VAD 임계값을 낮추면 작은 잡음이나 숨소리가 `ごめん。` 같�
 ```yaml
 filter_short_repeated_phrases: true
 filtered_short_phrases:
-  - ごめん。
   - すみません。
   - ありがとうございました。
 filtered_short_phrase_max_duration_s: 1.6
+filtered_always_phrases:
+  - ごめん。
 ```
 
 이 필터는 문구가 단독 자막이고 지정된 시간 이하일 때만 제거합니다. 예를 들어 `ごめん、待って。`처럼 문장 안에 포함된 경우는 유지합니다.
+`filtered_always_phrases`에 있는 문구는 표시 시간과 무관하게 단독 자막이면 제거합니다.
 
 또한 `.`, `。`, `、`, `??`, `?？`처럼 구두점만 있는 자막 조각은 최종 출력 전에 자동으로 제거됩니다.
 
@@ -209,4 +214,7 @@ docker run --rm -v "${PWD}:/workspace" -w /workspace kotoba-folder-watcher:2.2 p
 - 작은 소리 누락: `silence_threshold_db`를 더 낮추세요. 예: `-32dB`에서 `-35dB`.
 - 자막이 너무 오래 표시됨: `fallback_subtitle_max_duration_s`를 낮추거나 `fallback_subtitle_chars_per_second`를 높이세요.
 - 자막이 너무 빨리 사라짐: `fallback_subtitle_chars_per_second`를 낮추거나 `fallback_subtitle_padding_s`를 높이세요.
+- 자막이 전반적으로 빠르게 표시됨: `fallback_subtitle_start_delay_s`를 높이세요. 예: `0.5`에서 `0.8`.
+- 자막이 전반적으로 늦게 표시됨: `fallback_subtitle_start_delay_s`를 낮추세요. 예: `0.5`에서 `0.2`.
 - 짧은 오탐 증가: `filtered_short_phrases`에 문구를 추가하거나 `filtered_short_phrase_max_duration_s`를 조정하세요.
+- 길이에 상관없이 빼고 싶은 단독 문구가 있음: `filtered_always_phrases`에 문구를 추가하세요.

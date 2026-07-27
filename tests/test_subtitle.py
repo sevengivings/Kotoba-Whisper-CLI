@@ -7,7 +7,9 @@ from app.subtitle import (
     filter_punctuation_only_chunks,
     group_chunks_by_timing,
     filter_short_repeated_phrases,
+    filter_standalone_phrases,
     normalize_chunks,
+    shift_subtitle_timings,
     split_chunks_on_silence,
     split_text_for_spans,
     tighten_fallback_subtitle_durations,
@@ -78,23 +80,36 @@ def test_group_chunks_by_timing_uses_word_timestamps() -> None:
 
 def test_filter_short_repeated_phrases_removes_short_standalone_phrase() -> None:
     chunks = [
+        SubtitleChunk(0.0, 1.0, "\u3059\u307f\u307e\u305b\u3093\u3002"),
+        SubtitleChunk(2.0, 5.0, "\u3059\u307f\u307e\u305b\u3093\u3002"),
+        SubtitleChunk(6.0, 7.0, "\u3059\u307f\u307e\u305b\u3093\u3001\u5f85\u3063\u3066\u3002"),
+        SubtitleChunk(8.0, 9.0, "\u306f\u3044\u3002"),
+    ]
+
+    filtered = filter_short_repeated_phrases(
+        chunks,
+        ["\u3059\u307f\u307e\u305b\u3093\u3002"],
+        max_duration_s=1.6,
+    )
+
+    assert [(chunk.start, chunk.end, chunk.text) for chunk in filtered] == [
+        (2.0, 5.0, "\u3059\u307f\u307e\u305b\u3093\u3002"),
+        (6.0, 7.0, "\u3059\u307f\u307e\u305b\u3093\u3001\u5f85\u3063\u3066\u3002"),
+        (8.0, 9.0, "\u306f\u3044\u3002"),
+    ]
+
+
+def test_filter_standalone_phrases_removes_exact_phrase_regardless_duration() -> None:
+    chunks = [
         SubtitleChunk(0.0, 1.0, "\u3054\u3081\u3093\u3002"),
         SubtitleChunk(2.0, 5.0, "\u3054\u3081\u3093\u3002"),
         SubtitleChunk(6.0, 7.0, "\u3054\u3081\u3093\u3001\u5f85\u3063\u3066\u3002"),
         SubtitleChunk(8.0, 9.0, "\u306f\u3044\u3002"),
     ]
 
-    filtered = filter_short_repeated_phrases(
-        chunks,
-        ["\u3054\u3081\u3093\u3002"],
-        max_duration_s=1.6,
-    )
+    filtered = filter_standalone_phrases(chunks, ["\u3054\u3081\u3093\u3002"])
 
-    assert [(chunk.start, chunk.end, chunk.text) for chunk in filtered] == [
-        (2.0, 5.0, "\u3054\u3081\u3093\u3002"),
-        (6.0, 7.0, "\u3054\u3081\u3093\u3001\u5f85\u3063\u3066\u3002"),
-        (8.0, 9.0, "\u306f\u3044\u3002"),
-    ]
+    assert filtered == chunks[2:]
 
 
 def test_filter_punctuation_only_chunks_removes_orphan_punctuation() -> None:
@@ -130,6 +145,20 @@ def test_tighten_fallback_subtitle_durations_caps_short_text() -> None:
     assert round(tightened[0].end, 3) == 12.114
     assert tightened[0].text == chunks[0].text
     assert tightened[1] == chunks[1]
+
+
+def test_shift_subtitle_timings_offsets_start_and_end() -> None:
+    chunks = [
+        SubtitleChunk(1.0, 2.0, "A"),
+        SubtitleChunk(3.0, 4.0, "B"),
+    ]
+
+    shifted = shift_subtitle_timings(chunks, 0.5)
+
+    assert shifted == [
+        SubtitleChunk(1.5, 2.5, "A"),
+        SubtitleChunk(3.5, 4.5, "B"),
+    ]
 
 
 def test_group_chunks_by_timing_merges_unfinished_fragments() -> None:

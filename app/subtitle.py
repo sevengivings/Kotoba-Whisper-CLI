@@ -109,6 +109,16 @@ def filter_short_repeated_phrases(
     return filtered
 
 
+def filter_standalone_phrases(
+    chunks: list[SubtitleChunk],
+    phrases: list[str],
+) -> list[SubtitleChunk]:
+    normalized_phrases = {_normalize_phrase(phrase) for phrase in phrases}
+    if not normalized_phrases:
+        return chunks
+    return [chunk for chunk in chunks if _normalize_phrase(chunk.text) not in normalized_phrases]
+
+
 def filter_punctuation_only_chunks(chunks: list[SubtitleChunk]) -> list[SubtitleChunk]:
     return [chunk for chunk in chunks if not _is_punctuation_only(chunk.text)]
 
@@ -135,6 +145,15 @@ def tighten_fallback_subtitle_durations(
             continue
         tightened.append(SubtitleChunk(chunk.start, chunk.start + target_duration, chunk.text))
     return tightened
+
+
+def shift_subtitle_timings(chunks: list[SubtitleChunk], offset_s: float) -> list[SubtitleChunk]:
+    if offset_s == 0:
+        return chunks
+    return [
+        SubtitleChunk(max(0.0, chunk.start + offset_s), max(0.0, chunk.end + offset_s), chunk.text)
+        for chunk in chunks
+    ]
 
 
 def split_chunks_on_silence(
