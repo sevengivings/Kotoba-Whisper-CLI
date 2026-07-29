@@ -72,11 +72,37 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-file.ps1 "Y:\Best\sample.mp4"
 ```
 
-완료까지 기다리려면:
+제출만 하고 바로 돌아오려면:
 
 ```powershell
-.\process-file.ps1 "Y:\Best\sample.mp4" -Wait
+.\process-file.ps1 "Y:\Best\sample.mp4" -NoWait
 ```
+
+디렉터리 안의 지원 미디어 파일을 한꺼번에 처리 큐에 넣으려면:
+
+```powershell
+.\process-dir.ps1 "Y:\Best"
+```
+
+하위 폴더까지 포함하려면:
+
+```powershell
+.\process-dir.ps1 "Y:\Best" -Recurse
+```
+
+모든 제출 파일의 완료까지 기다리려면:
+
+```powershell
+.\process-dir.ps1 "Y:\Best"
+```
+
+제출만 하고 바로 돌아오려면:
+
+```powershell
+.\process-dir.ps1 "Y:\Best" -NoWait
+```
+
+`process-file.ps1`과 `process-dir.ps1`은 기본적으로 완료까지 기다립니다. `-NoWait`를 붙이면 파일을 `input` 폴더에 제출한 뒤 바로 종료합니다. `process-dir.ps1`은 기본적으로 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 등 지원 확장자만 복사합니다. 파일은 `.part`로 먼저 복사한 뒤 이름을 바꾸므로, watcher가 복사 중인 파일을 먼저 처리하지 않습니다.
 
 ## 자막 분할 및 동기화 설정
 

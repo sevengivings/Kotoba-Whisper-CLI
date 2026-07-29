@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
 from app.config import AppConfig
 
 LOGGER = logging.getLogger(__name__)
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"The input name `inputs` is deprecated\. Please make sure to use `input_features` instead\.",
+    category=FutureWarning,
+    module=r"transformers\.models\.whisper\.generation_whisper",
+)
 
 
 @dataclass(frozen=True)

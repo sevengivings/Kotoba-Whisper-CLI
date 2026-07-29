@@ -2,12 +2,58 @@ param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$Path,
 
+    [switch]$NoWait,
+
     [switch]$Wait,
 
     [int]$TimeoutMinutes = 240
 )
 
 $ErrorActionPreference = "Stop"
+
+function Test-SubmissionNameAvailable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TargetName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$TargetPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$InputDir,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputDir,
+
+        [Parameter(Mandatory = $true)]
+        [string]$FailedDir,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ArchiveDir,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ProcessingDir
+    )
+
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($TargetName)
+    $paths = @(
+        $TargetPath,
+        "$TargetPath.part",
+        (Join-Path $InputDir "$TargetName.part"),
+        (Join-Path $ProcessingDir $TargetName),
+        (Join-Path $ArchiveDir $TargetName),
+        (Join-Path $FailedDir $TargetName),
+        (Join-Path $OutputDir "$baseName.ja.srt"),
+        (Join-Path $OutputDir "$baseName.process.json")
+    )
+
+    foreach ($path in $paths) {
+        if (Test-Path -LiteralPath $path) {
+            return $false
+        }
+    }
+    return $true
+}
 
 Set-Location -LiteralPath $PSScriptRoot
 
@@ -37,6 +83,10 @@ if (-not $containerStatus) {
 
 $inputDir = Join-Path $PSScriptRoot "input"
 New-Item -ItemType Directory -Force -Path $inputDir | Out-Null
+$outputDir = Join-Path $PSScriptRoot "output"
+$failedDir = Join-Path $PSScriptRoot "failed"
+$archiveDir = Join-Path $PSScriptRoot "archive"
+$processingDir = Join-Path $PSScriptRoot "processing"
 
 $source = Get-Item -LiteralPath $Path
 $baseName = [System.IO.Path]::GetFileNameWithoutExtension($source.Name)
@@ -44,10 +94,23 @@ $extension = $source.Extension
 $targetName = $source.Name
 $targetPath = Join-Path $inputDir $targetName
 
-if (Test-Path -LiteralPath $targetPath) {
+$index = 1
+while (-not (Test-SubmissionNameAvailable `
+    -TargetName $targetName `
+    -TargetPath $targetPath `
+    -InputDir $inputDir `
+    -OutputDir $outputDir `
+    -FailedDir $failedDir `
+    -ArchiveDir $archiveDir `
+    -ProcessingDir $processingDir)) {
     $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $targetName = "$baseName`_$stamp$extension"
+    if ($index -eq 1) {
+        $targetName = "$baseName`_$stamp$extension"
+    } else {
+        $targetName = "$baseName`_$stamp`_$index$extension"
+    }
     $targetPath = Join-Path $inputDir $targetName
+    $index += 1
 }
 
 $partPath = "$targetPath.part"
@@ -65,7 +128,7 @@ Move-Item -LiteralPath $partPath -Destination $targetPath
 
 Write-Host "Submitted. The watcher will process it after the file stability check."
 
-if (-not $Wait) {
+if ($NoWait) {
     Write-Host ""
     Write-Host "Watch progress:"
     Write-Host "  .\logs.ps1"
@@ -110,4 +173,3 @@ while ((Get-Date) -lt $deadline) {
 }
 
 throw "Timed out while waiting for completion: $targetName"
-
