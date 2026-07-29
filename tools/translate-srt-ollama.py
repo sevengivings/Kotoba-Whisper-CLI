@@ -28,19 +28,32 @@ SUBTITLE_STYLE_PROMPT = (
     "Do not make the line more explicit than the source. "
 )
 
+KOREAN_POLITE_STYLE_PROMPT = (
+    "When the target language is Korean, always use polite Korean speech style. "
+    "Do not use banmal or casual plain endings. "
+    "Prefer endings such as -요, -예요, -이에요, -세요, -습니다, and -입니다 when the sentence needs an ending. "
+    "Keep very short reactions natural, but do not turn them into rude or informal Korean. "
+)
+
+KOREAN_BANMAL_STYLE_PROMPT = (
+    "When the target language is Korean, use natural informal Korean speech style, also known as banmal. "
+    "Avoid polite Korean endings such as -요, -예요, -이에요, -세요, -습니다, or -입니다 unless the source explicitly requires formality. "
+    "Prefer concise informal spoken endings such as -해, -야, -네, -지, -잖아, and -거든 when natural. "
+    "Keep very short reactions natural and casual. "
+)
+
+KOREAN_STRICT_BANMAL_STYLE_PROMPT = (
+    "When the target language is Korean, use strict informal Korean speech style. "
+    "The Korean output must be non-polite and casual, even if the Japanese source uses polite expressions such as です, ます, ください, or お願いします. "
+    "Convert polite Korean expressions into informal Korean. "
+    "Do not use Korean polite sentence endings such as -요, -예요, -이에요, -세요, -습니다, -입니다, or 감사합니다. "
+    "Use informal forms such as 고마워, 기다려, 해, 야, 네, 지, 잖아, and 거든 when natural. "
+    "For example, translate ありがとうございます as 고마워, not 감사합니다; translate 기다려 주세요 as 기다려. "
+)
+
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Translate SRT subtitles with Ollama.")
-    parser.add_argument("input_srt", type=Path)
-    parser.add_argument("--output", type=Path)
-    parser.add_argument("--source", default="japanese")
-    parser.add_argument("--target", default="korean")
-    parser.add_argument("--ollama-host", default="localhost")
-    parser.add_argument("--ollama-port", default="11434")
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--batch-translate", action="store_true")
-    parser.add_argument("--text-split-size", type=int, default=300)
-    parser.add_argument("--timeout-seconds", type=int, default=600)
+    parser = build_parser()
     args = parser.parse_args()
 
     input_srt: Path = args.input_srt
@@ -63,8 +76,10 @@ def main() -> int:
         source_lang=args.source,
         target_lang=args.target,
         batch_translate=args.batch_translate,
+        batch_size=args.batch_size,
         text_split_size=args.text_split_size,
         timeout_seconds=args.timeout_seconds,
+        korean_style=args.korean_style,
     )
 
     part_path = output_srt.with_suffix(output_srt.suffix + ".part")
@@ -81,12 +96,34 @@ def main() -> int:
         "source": args.source,
         "target": args.target,
         "subtitle_count": len(entries),
+        "batch_translate": args.batch_translate,
+        "batch_size": args.batch_size if args.batch_translate else None,
+        "korean_style": args.korean_style,
         "processing_seconds": round(time.time() - started, 3),
     }
     metadata_path = output_srt.with_suffix(".translation.json")
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[Info] Translation saved: {output_srt}")
     return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Translate SRT subtitles with Ollama.")
+    parser.add_argument("input_srt", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--source", default="japanese")
+    parser.add_argument("--target", default="korean")
+    parser.add_argument("--ollama-host", default="localhost")
+    parser.add_argument("--ollama-port", default="11434")
+    parser.add_argument("--model", required=True)
+    parser.set_defaults(batch_translate=True)
+    parser.add_argument("--batch-translate", dest="batch_translate", action="store_true")
+    parser.add_argument("--no-batch-translate", dest="batch_translate", action="store_false")
+    parser.add_argument("--batch-size", type=int, default=50)
+    parser.add_argument("--text-split-size", type=int, default=0)
+    parser.add_argument("--timeout-seconds", type=int, default=600)
+    parser.add_argument("--korean-style", choices=("polite", "banmal", "strict-banmal"), default="polite")
+    return parser
 
 
 def parse_srt(path: Path) -> list[dict[str, str]]:
@@ -112,13 +149,26 @@ def translate_entries(
     source_lang: str,
     target_lang: str,
     batch_translate: bool,
+    batch_size: int,
     text_split_size: int,
     timeout_seconds: int,
+    korean_style: str,
 ) -> list[str]:
     texts = [entry["text"] for entry in entries]
     translated = [""] * len(texts)
     if batch_translate:
-        for batch in make_batches(texts, text_split_size):
+        if batch_size <= 0:
+            raise RuntimeError("--batch-size must be greater than 0")
+        if text_split_size < 0:
+            raise RuntimeError("--text-split-size must be greater than or equal to 0")
+        batches = make_batches(texts, batch_size, text_split_size)
+        for batch_no, batch in enumerate(batches, 1):
+            first_subtitle = batch[0] + 1
+            last_subtitle = batch[-1] + 1
+            print(
+                f"[Info] Translating batch {batch_no}/{len(batches)}: "
+                f"subtitles {first_subtitle}-{last_subtitle}"
+            )
             numbered = [f"[{local_no}] {texts[index]}" for local_no, index in enumerate(batch, 1)]
             result = translate_text_ollama(
                 host,
@@ -128,6 +178,7 @@ def translate_entries(
                 target_lang,
                 "\n".join(numbered),
                 timeout_seconds,
+                korean_style,
             )
             parsed = parse_batch_translation(result, batch)
             for index, translated_text in parsed.items():
@@ -138,25 +189,27 @@ def translate_entries(
             print(f"[Warning] Retrying {len(missing)} missing subtitle(s) one by one")
             for index in missing:
                 translated[index] = translate_text_ollama(
-                    host, port, model, source_lang, target_lang, texts[index], timeout_seconds
+                    host, port, model, source_lang, target_lang, texts[index], timeout_seconds, korean_style
                 )
     else:
         for index, text in enumerate(texts, 1):
             print(f"[Info] Translating line {index}/{len(texts)}")
             translated[index - 1] = translate_text_ollama(
-                host, port, model, source_lang, target_lang, text, timeout_seconds
+                host, port, model, source_lang, target_lang, text, timeout_seconds, korean_style
             )
 
     validate_translations(translated)
     return translated
 
 
-def make_batches(texts: list[str], text_split_size: int) -> list[list[int]]:
+def make_batches(texts: list[str], batch_size: int, text_split_size: int) -> list[list[int]]:
     batches: list[list[int]] = []
     current: list[int] = []
     current_length = 0
     for index, text in enumerate(texts):
-        if current and current_length + len(text) >= text_split_size:
+        next_length = current_length + len(text) + 1
+        exceeds_text_limit = text_split_size > 0 and next_length >= text_split_size
+        if current and (len(current) >= batch_size or exceeds_text_limit):
             batches.append(current)
             current = []
             current_length = 0
@@ -175,26 +228,11 @@ def translate_text_ollama(
     target_lang: str,
     text: str,
     timeout_seconds: int,
+    korean_style: str = "polite",
 ) -> str:
     url = f"http://{host}:{port}/api/chat"
     batch_mode = "\n" in text or re.match(r"^\[\d+\]\s+", text.strip())
-    if batch_mode:
-        system_prompt = (
-            "You are a professional video subtitle translator. "
-            f"Translate the following text from {source_lang} to {target_lang}. "
-            f"{SUBTITLE_STYLE_PROMPT}"
-            "The input contains lines numbered [N]. "
-            "Translate each line separately and prefix the output with the same [N]. "
-            "Do not merge lines. Do not renumber lines. Output only the translated text."
-        )
-    else:
-        system_prompt = (
-            "You are a professional video subtitle translator. "
-            f"Translate the following text from {source_lang} to {target_lang}. "
-            f"{SUBTITLE_STYLE_PROMPT}"
-            "Ensure the translation is natural and conversational. "
-            "Do not include any introductory, concluding remarks, or notes. Output only the translated text."
-        )
+    system_prompt = build_system_prompt(source_lang, target_lang, batch_mode, korean_style)
     payload = {
         "model": model,
         "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": text}],
@@ -213,6 +251,50 @@ def translate_text_ollama(
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Ollama translation failed: {exc}") from exc
     return str(result.get("message", {}).get("content", "")).strip()
+
+
+def build_system_prompt(
+    source_lang: str,
+    target_lang: str,
+    batch_mode: bool,
+    korean_style: str = "polite",
+) -> str:
+    korean_style_prompt = _korean_style_prompt(target_lang, korean_style)
+    if batch_mode:
+        return (
+            "You are a professional video subtitle translator. "
+            f"Translate the following text from {source_lang} to {target_lang}. "
+            f"{SUBTITLE_STYLE_PROMPT}"
+            f"{korean_style_prompt}"
+            "The input contains lines numbered [N]. "
+            "Translate each line separately and prefix the output with the same [N]. "
+            "Do not merge lines. Do not renumber lines. Output only the translated text."
+        )
+    return (
+        "You are a professional video subtitle translator. "
+        f"Translate the following text from {source_lang} to {target_lang}. "
+        f"{SUBTITLE_STYLE_PROMPT}"
+        f"{korean_style_prompt}"
+        "Ensure the translation is natural and conversational. "
+        "Do not include any introductory, concluding remarks, or notes. Output only the translated text."
+    )
+
+
+def _is_korean_target(target_lang: str) -> bool:
+    normalized = target_lang.strip().lower()
+    return normalized in {"ko", "kor", "korean", "kr", "한국어", "조선말"}
+
+
+def _korean_style_prompt(target_lang: str, korean_style: str) -> str:
+    if not _is_korean_target(target_lang):
+        return ""
+    if korean_style == "polite":
+        return KOREAN_POLITE_STYLE_PROMPT
+    if korean_style == "banmal":
+        return KOREAN_BANMAL_STYLE_PROMPT
+    if korean_style == "strict-banmal":
+        return KOREAN_STRICT_BANMAL_STYLE_PROMPT
+    raise RuntimeError("--korean-style must be polite, banmal, or strict-banmal")
 
 
 def parse_batch_translation(result: str, batch: list[int]) -> dict[int, str]:

@@ -148,6 +148,10 @@ docker logs --tail 50 kotoba-folder-watcher
 
 `-Translate`는 완료를 기다린 뒤 `output\<name>.ja.srt`를 `output\<name>.ko.srt`로 번역합니다. 번역 전에는 `http://localhost:11434/api/tags`로 Ollama 서버와 모델 목록을 확인합니다. `-TranslateModelChoice`를 붙이면 Ollama 서버에 등록된 모델을 번호로 보여줍니다. 번역이 성공하면 사용한 모델을 `config/translation-defaults.json`에 저장하고, 다음부터는 `-Translate`만 붙여도 저장된 모델을 재사용합니다. 모델을 직접 지정하려면 `-TranslationModel "gemma3:4b"`처럼 넘기면 됩니다. 다른 PC나 컨테이너의 Ollama를 쓰려면 `-OllamaHost`와 `-OllamaPort`를 지정하세요.
 
+번역은 기본적으로 자막 50개씩 묶어 처리합니다. 묶음 단위로 진행 상황이 표시되며, 더 크거나 작게 나누려면 `-BatchSize 100` 또는 `--batch-size 100`처럼 지정하세요. 한 줄씩 번역하려면 `process-file.ps1`/`process-dir.ps1`에서는 `-NoBatchTranslate`, 직접 실행 시에는 `tools\translate-srt-ollama.py --no-batch-translate`를 사용합니다. `--batch-translate`와 `-BatchTranslate`는 기존 명령 호환용으로 남아 있습니다. `--text-split-size`는 긴 프롬프트를 더 잘게 자르고 싶을 때만 추가로 쓰는 글자 수 제한입니다.
+
+한국어 번역은 기본적으로 반말을 피하고 존댓말 자막체를 사용하도록 프롬프트를 강제합니다. 편한 말투가 필요하면 `process-file.ps1`/`process-dir.ps1`에서는 `-KoreanStyle banmal`, 직접 실행 시에는 `tools\translate-srt-ollama.py --korean-style banmal`을 사용하세요. 일본어 원문이 존대 표현이어도 한국어 출력을 비존대 informal 스타일로 강하게 고정하려면 `-KoreanStyle strict-banmal` 또는 `--korean-style strict-banmal`을 사용합니다.
+
 스크립트로 제출한 파일은 원본을 복사한 staged copy이므로, 성공 후 기본적으로 삭제됩니다. 예전처럼 처리된 복사본을 `archive`에 남기려면 `-KeepStagedCopy`를 붙이세요.
 
 ```powershell

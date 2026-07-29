@@ -30,7 +30,14 @@ param(
 
     [switch]$BatchTranslate,
 
-    [int]$TextSplitSize = 300,
+    [switch]$NoBatchTranslate,
+
+    [int]$BatchSize = 50,
+
+    [int]$TextSplitSize = 0,
+
+    [ValidateSet("polite", "banmal", "strict-banmal")]
+    [string]$KoreanStyle = "polite",
 
     [string[]]$Extensions = @(".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".m2ts", ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".opus", ".wma")
 )
@@ -233,10 +240,15 @@ function Invoke-SrtTranslation {
         "--ollama-host", $OllamaHost,
         "--ollama-port", ([string]$OllamaPort),
         "--model", $Model,
-        "--text-split-size", ([string]$TextSplitSize)
+        "--batch-size", ([string]$BatchSize),
+        "--text-split-size", ([string]$TextSplitSize),
+        "--korean-style", $KoreanStyle
     )
     if ($BatchTranslate) {
         $args += "--batch-translate"
+    }
+    if ($NoBatchTranslate) {
+        $args += "--no-batch-translate"
     }
     Write-Host ""
     Write-Host "Translating SRT:"
@@ -357,6 +369,10 @@ if ($Translate -and $NoWait) {
 
 if ($AutoSilenceThreshold -and -not [string]::IsNullOrWhiteSpace($SilenceThresholdDb)) {
     throw "Use either -AutoSilenceThreshold or -SilenceThresholdDb, not both."
+}
+
+if ($BatchTranslate -and $NoBatchTranslate) {
+    throw "Use either -BatchTranslate or -NoBatchTranslate, not both."
 }
 
 $translationModel = ""
