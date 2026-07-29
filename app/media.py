@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import subprocess
+import wave
+from array import array
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +19,14 @@ SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 class SilenceSpan:
     start: float
     end: float
+
+
+@dataclass(frozen=True)
+class SilenceThresholdEstimate:
+    threshold_db: str
+    noise_floor_db: float
+    speech_level_db: float
+    analyzed_frame_count: int
 
 
 def is_supported_media(path: Path) -> bool:
@@ -124,6 +135,31 @@ def detect_silences(
     return parse_silencedetect_output(result.stderr)
 
 
+def estimate_silence_threshold(
+    wav_path: Path,
+    min_threshold_db: float = -42.0,
+    max_threshold_db: float = -28.0,
+    frame_duration_s: float = 0.03,
+) -> SilenceThresholdEstimate:
+    frame_levels = _wav_frame_dbfs(wav_path, frame_duration_s)
+    if not frame_levels:
+        threshold = _format_db(min_threshold_db)
+        return SilenceThresholdEstimate(threshold, min_threshold_db, min_threshold_db, 0)
+
+    sorted_levels = sorted(frame_levels)
+    noise_floor = _percentile(sorted_levels, 20)
+    speech_level = _percentile(sorted_levels, 85)
+    dynamic_range = max(0.0, speech_level - noise_floor)
+    threshold = noise_floor + max(6.0, min(14.0, dynamic_range * 0.35))
+    threshold = max(min_threshold_db, min(max_threshold_db, threshold))
+    return SilenceThresholdEstimate(
+        _format_db(threshold),
+        round(noise_floor, 2),
+        round(speech_level, 2),
+        len(frame_levels),
+    )
+
+
 def parse_silencedetect_output(stderr: str) -> list[SilenceSpan]:
     silences: list[SilenceSpan] = []
     current_start: float | None = None
@@ -139,6 +175,53 @@ def parse_silencedetect_output(stderr: str) -> list[SilenceSpan]:
                 silences.append(SilenceSpan(current_start, end))
             current_start = None
     return silences
+
+
+def _wav_frame_dbfs(wav_path: Path, frame_duration_s: float) -> list[float]:
+    levels: list[float] = []
+    with wave.open(str(wav_path), "rb") as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        frame_rate = wav_file.getframerate()
+        if sample_width != 2:
+            raise RuntimeError(f"Auto silence threshold expects 16-bit PCM WAV: {wav_path}")
+        samples_per_frame = max(1, int(frame_rate * frame_duration_s))
+        while True:
+            raw = wav_file.readframes(samples_per_frame)
+            if not raw:
+                break
+            samples = array("h")
+            samples.frombytes(raw)
+            if channels > 1:
+                samples = array("h", samples[::channels])
+            if not samples:
+                continue
+            mean_square = sum(sample * sample for sample in samples) / len(samples)
+            if mean_square <= 0:
+                levels.append(-100.0)
+                continue
+            rms = math.sqrt(mean_square)
+            levels.append(20.0 * math.log10(rms / 32768.0))
+    return levels
+
+
+def _percentile(sorted_values: list[float], percentile: float) -> float:
+    if not sorted_values:
+        raise ValueError("percentile requires values")
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    position = (len(sorted_values) - 1) * percentile / 100.0
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return sorted_values[lower]
+    fraction = position - lower
+    return sorted_values[lower] * (1.0 - fraction) + sorted_values[upper] * fraction
+
+
+def _format_db(value: float) -> str:
+    rounded = int(round(value))
+    return f"{rounded}dB"
 
 
 def speech_spans_from_silences(

@@ -14,6 +14,7 @@ from typing import Any
 from app.config import AppConfig
 from app.media import (
     detect_silences,
+    estimate_silence_threshold,
     extract_audio,
     extract_audio_segment,
     is_supported_media,
@@ -103,6 +104,17 @@ class MediaProcessor:
             media_duration = probe_duration_seconds(processing_file)
             LOGGER.info("Audio extraction started: %s", processing_file.name)
             extract_audio(processing_file, wav_path)
+            auto_silence_threshold = None
+            if bool(job_options.get("auto_silence_threshold", False)):
+                auto_silence_threshold = estimate_silence_threshold(wav_path)
+                silence_threshold_db = auto_silence_threshold.threshold_db
+                LOGGER.info(
+                    "Auto silence threshold selected: threshold=%s noise_floor=%.2fdB speech_level=%.2fdB frames=%s",
+                    auto_silence_threshold.threshold_db,
+                    auto_silence_threshold.noise_floor_db,
+                    auto_silence_threshold.speech_level_db,
+                    auto_silence_threshold.analyzed_frame_count,
+                )
             silences = []
             if self.config.inference.silence_split or self.config.inference.vad_pre_split:
                 try:
@@ -195,6 +207,16 @@ class MediaProcessor:
                 "detected_silence_count": silence_count,
                 "silence_threshold_db": silence_threshold_db,
                 "min_silence_duration_s": min_silence_duration_s,
+                "auto_silence_threshold": (
+                    {
+                        "threshold_db": auto_silence_threshold.threshold_db,
+                        "noise_floor_db": auto_silence_threshold.noise_floor_db,
+                        "speech_level_db": auto_silence_threshold.speech_level_db,
+                        "analyzed_frame_count": auto_silence_threshold.analyzed_frame_count,
+                    }
+                    if auto_silence_threshold is not None
+                    else None
+                ),
                 "job_options": job_options,
                 "source_disposition": source_disposition,
                 "vad_pre_split": self.config.inference.vad_pre_split,
@@ -355,6 +377,8 @@ def load_job_options(options_path: Path) -> dict[str, Any]:
         if min_silence_duration_s <= 0:
             raise ValueError("job option min_silence_duration_s must be > 0")
         options["min_silence_duration_s"] = min_silence_duration_s
+    if "auto_silence_threshold" in raw:
+        options["auto_silence_threshold"] = bool(raw["auto_silence_threshold"])
     if "delete_source_on_success" in raw:
         options["delete_source_on_success"] = bool(raw["delete_source_on_success"])
     return options

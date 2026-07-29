@@ -10,6 +10,8 @@ param(
 
     [string]$SilenceThresholdDb,
 
+    [switch]$AutoSilenceThreshold,
+
     [double]$MinSilenceDurationSeconds = 0,
 
     [switch]$Translate,
@@ -86,6 +88,8 @@ function Write-JobOptions {
 
         [string]$SilenceThresholdDb,
 
+        [bool]$AutoSilenceThreshold,
+
         [double]$MinSilenceDurationSeconds,
 
         [bool]$DeleteSourceOnSuccess
@@ -93,6 +97,9 @@ function Write-JobOptions {
 
     $options = [ordered]@{}
     $options.delete_source_on_success = $DeleteSourceOnSuccess
+    if ($AutoSilenceThreshold) {
+        $options.auto_silence_threshold = $true
+    }
     if (-not [string]::IsNullOrWhiteSpace($SilenceThresholdDb)) {
         if ($SilenceThresholdDb -notmatch '^-?\d+(\.\d+)?dB$') {
             throw "SilenceThresholdDb must look like -35dB"
@@ -314,6 +321,10 @@ if ($Translate -and $NoWait) {
     throw "-Translate requires the default wait mode. Remove -NoWait."
 }
 
+if ($AutoSilenceThreshold -and -not [string]::IsNullOrWhiteSpace($SilenceThresholdDb)) {
+    throw "Use either -AutoSilenceThreshold or -SilenceThresholdDb, not both."
+}
+
 $translationModel = ""
 if ($Translate) {
     if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
@@ -368,6 +379,9 @@ Write-Host "  Staged: $targetPath"
 if (-not [string]::IsNullOrWhiteSpace($SilenceThresholdDb)) {
     Write-Host "  Silence threshold override: $SilenceThresholdDb"
 }
+if ($AutoSilenceThreshold) {
+    Write-Host "  Silence threshold override: auto"
+}
 if ($MinSilenceDurationSeconds -gt 0) {
     Write-Host "  Min silence duration override: $MinSilenceDurationSeconds"
 }
@@ -381,6 +395,7 @@ Write-Host ""
 Write-JobOptions `
     -OptionsPath $optionsPath `
     -SilenceThresholdDb $SilenceThresholdDb `
+    -AutoSilenceThreshold ([bool]$AutoSilenceThreshold) `
     -MinSilenceDurationSeconds $MinSilenceDurationSeconds `
     -DeleteSourceOnSuccess (-not $KeepStagedCopy)
 

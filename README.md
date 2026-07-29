@@ -84,6 +84,12 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-file.ps1 "Y:\Best\sample.mp4" -SilenceThresholdDb -35dB
 ```
 
+파일의 전체 음량 분포를 보고 무음 감지 기준을 자동으로 잡으려면:
+
+```powershell
+.\process-file.ps1 "Y:\Best\sample.mp4" -AutoSilenceThreshold
+```
+
 전사 완료 후 Ollama로 한국어 자막까지 번역하려면:
 
 ```powershell
@@ -126,13 +132,19 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-dir.ps1 "Y:\Best" -SilenceThresholdDb -35dB
 ```
 
+디렉터리 안의 각 파일마다 무음 감지 기준을 자동으로 잡으려면:
+
+```powershell
+.\process-dir.ps1 "Y:\Best" -AutoSilenceThreshold
+```
+
 디렉터리 전체를 전사 후 번역하려면:
 
 ```powershell
 .\process-dir.ps1 "Y:\Best" -Translate
 ```
 
-`process-file.ps1`과 `process-dir.ps1`은 기본적으로 완료까지 기다립니다. `-NoWait`를 붙이면 파일을 `input` 폴더에 제출한 뒤 바로 종료합니다. Docker 컨테이너가 떠 있지 않으면 제출 전에 `start.ps1`로 먼저 시작합니다. Docker Desktop 데몬이 응답하지 않는 경우에는 Docker Desktop 실행을 시도하고, 그래도 준비되지 않으면 명확한 오류를 보여줍니다. `-SilenceThresholdDb`를 붙이면 해당 제출 파일에만 `config.yaml`의 `silence_threshold_db`를 override합니다. 필요하면 `-MinSilenceDurationSeconds 0.4`처럼 최소 무음 길이도 함께 override할 수 있습니다. `process-dir.ps1`은 기본적으로 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 등 지원 확장자만 복사합니다. 파일은 `.part`로 먼저 복사한 뒤 이름을 바꾸므로, watcher가 복사 중인 파일을 먼저 처리하지 않습니다.
+`process-file.ps1`과 `process-dir.ps1`은 기본적으로 완료까지 기다립니다. `-NoWait`를 붙이면 파일을 `input` 폴더에 제출한 뒤 바로 종료합니다. Docker 컨테이너가 떠 있지 않으면 제출 전에 `start.ps1`로 먼저 시작합니다. Docker Desktop 데몬이 응답하지 않는 경우에는 Docker Desktop 실행을 시도하고, 그래도 준비되지 않으면 명확한 오류를 보여줍니다. `-SilenceThresholdDb`를 붙이면 해당 제출 파일에만 `config.yaml`의 `silence_threshold_db`를 override합니다. `-AutoSilenceThreshold`를 붙이면 컨테이너 안에서 추출된 WAV의 frame RMS 분포를 분석해 파일별 `silence_threshold_db`를 자동으로 선택합니다. 두 옵션은 동시에 쓸 수 없습니다. 필요하면 `-MinSilenceDurationSeconds 0.4`처럼 최소 무음 길이도 함께 override할 수 있습니다. `process-dir.ps1`은 기본적으로 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 등 지원 확장자만 복사합니다. 파일은 `.part`로 먼저 복사한 뒤 이름을 바꾸므로, watcher가 복사 중인 파일을 먼저 처리하지 않습니다.
 
 `-Translate`는 완료를 기다린 뒤 `output\<name>.ja.srt`를 `output\<name>.ko.srt`로 번역합니다. 번역 전에는 `http://localhost:11434/api/tags`로 Ollama 서버와 모델 목록을 확인합니다. `-TranslateModelChoice`를 붙이면 Ollama 서버에 등록된 모델을 번호로 보여줍니다. 번역이 성공하면 사용한 모델을 `config/translation-defaults.json`에 저장하고, 다음부터는 `-Translate`만 붙여도 저장된 모델을 재사용합니다. 모델을 직접 지정하려면 `-TranslationModel "gemma3:4b"`처럼 넘기면 됩니다. 다른 PC나 컨테이너의 Ollama를 쓰려면 `-OllamaHost`와 `-OllamaPort`를 지정하세요.
 
@@ -176,10 +188,11 @@ inference:
 설정 의미:
 
 - `silence_threshold_db`: 무음 판정 기준입니다. 값이 낮을수록 작은 소리도 발화로 잡습니다.
-  - `-30dB`: 배경음이 큰 영상에서 더 촘촘하게 나눔
+  - `-30dB`: 무음 판정이 강해져 작은 발화를 놓칠 수 있음
   - `-32dB`: 현재 권장값
-  - `-35dB`: 명확한 발화 위주, 누락 가능성 증가
+  - `-35dB`: 작은 발화 보존에 조금 더 유리
   - `-40dB` 이하: 작은 소리 보존에 유리하지만 긴 segment와 오탐 가능성 증가
+- `-AutoSilenceThreshold`: 파일 전체 음량 분포의 하위 20%를 배경 소음, 상위 85%를 음성 후보로 보고 `silence_threshold_db`를 자동 선택합니다. 선택된 값과 분석 정보는 `output\<name>.process.json`의 `auto_silence_threshold`에 기록됩니다.
 - `vad_pre_split`: 전사 전에 발화 구간을 먼저 나누어 Whisper에 넣습니다.
 - `vad_min_speech_duration_s`: 짧은 발화도 버리지 않기 위한 최소 발화 길이입니다.
 - `vad_padding_s`: VAD 구간 앞뒤에 붙이는 여유 시간입니다.
@@ -190,6 +203,22 @@ inference:
 - `fallback_subtitle_chars_per_second`: fallback 자막의 예상 읽기 속도입니다. 값이 낮을수록 더 오래 표시됩니다.
 - `fallback_subtitle_padding_s`: fallback 자막 표시 시간에 더하는 여유 시간입니다.
 - `fallback_subtitle_start_delay_s`: fallback 자막 전체를 뒤로 미는 시간입니다. VAD segment가 실제 발화보다 조금 일찍 시작할 때 보정합니다.
+
+자동 기준을 사용하면 처리 결과 JSON에 다음처럼 분석값이 남습니다.
+
+```json
+{
+  "silence_threshold_db": "-42dB",
+  "auto_silence_threshold": {
+    "threshold_db": "-42dB",
+    "noise_floor_db": -64.79,
+    "speech_level_db": -45.3,
+    "analyzed_frame_count": 73843
+  }
+}
+```
+
+`threshold_db`가 `-42dB`에 자주 붙으면 해당 영상들이 전체적으로 작은 음성 위주라는 뜻입니다. 이 경우 자동 기준을 쓰는 편이 기본 `-32dB`보다 작은 발화를 보존하는 데 유리합니다.
 
 word timestamp가 성공하면 단어 단위 시간으로 자막을 묶습니다. 실패하면 segment timestamp로 자동 fallback하며, 이때 짧은 문장이 10초 이상 떠 있는 문제를 줄이기 위해 문장 길이 기반으로 표시 시간을 줄이고 필요하면 시작 시간을 약간 늦춥니다.
 

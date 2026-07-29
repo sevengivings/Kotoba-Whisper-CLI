@@ -1,6 +1,8 @@
 from pathlib import Path
+import wave
+from array import array
 
-from app.media import is_supported_media
+from app.media import estimate_silence_threshold, is_supported_media
 from app.processor import (
     _offset_raw_chunks,
     extract_raw_chunks,
@@ -92,6 +94,7 @@ def test_load_job_options_accepts_silence_overrides(tmp_path: Path) -> None:
         (
             '{"silence_threshold_db": "-35dB", '
             '"min_silence_duration_s": 0.4, '
+            '"auto_silence_threshold": true, '
             '"delete_source_on_success": true}'
         ),
         encoding="utf-8",
@@ -100,6 +103,7 @@ def test_load_job_options_accepts_silence_overrides(tmp_path: Path) -> None:
     assert load_job_options(options_path) == {
         "silence_threshold_db": "-35dB",
         "min_silence_duration_s": 0.4,
+        "auto_silence_threshold": True,
         "delete_source_on_success": True,
     }
 
@@ -121,3 +125,22 @@ def test_load_job_options_rejects_invalid_threshold(tmp_path: Path) -> None:
         assert "silence_threshold_db" in str(exc)
     else:
         raise AssertionError("Expected invalid silence threshold to fail")
+
+
+def test_estimate_silence_threshold_from_wav(tmp_path: Path) -> None:
+    wav_path = tmp_path / "sample.wav"
+    samples = array("h")
+    samples.extend([260] * 16000)
+    samples.extend([2600] * 16000)
+    with wave.open(str(wav_path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(16000)
+        wav_file.writeframes(samples.tobytes())
+
+    estimate = estimate_silence_threshold(wav_path)
+
+    assert estimate.threshold_db == "-35dB"
+    assert round(estimate.noise_floor_db) == -42
+    assert round(estimate.speech_level_db) == -22
+    assert estimate.analyzed_frame_count > 0
