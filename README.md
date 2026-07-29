@@ -78,6 +78,24 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-file.ps1 "Y:\Best\sample.mp4" -NoWait
 ```
 
+특정 파일만 무음 감지 기준을 바꾸려면:
+
+```powershell
+.\process-file.ps1 "Y:\Best\sample.mp4" -SilenceThresholdDb -35dB
+```
+
+전사 완료 후 Ollama로 한국어 자막까지 번역하려면:
+
+```powershell
+.\process-file.ps1 "Y:\Best\sample.mp4" -Translate
+```
+
+처음 사용할 모델을 목록에서 고르려면:
+
+```powershell
+.\process-file.ps1 "Y:\Best\sample.mp4" -Translate -TranslateModelChoice
+```
+
 디렉터리 안의 지원 미디어 파일을 한꺼번에 처리 큐에 넣으려면:
 
 ```powershell
@@ -102,7 +120,27 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-dir.ps1 "Y:\Best" -NoWait
 ```
 
-`process-file.ps1`과 `process-dir.ps1`은 기본적으로 완료까지 기다립니다. `-NoWait`를 붙이면 파일을 `input` 폴더에 제출한 뒤 바로 종료합니다. `process-dir.ps1`은 기본적으로 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 등 지원 확장자만 복사합니다. 파일은 `.part`로 먼저 복사한 뒤 이름을 바꾸므로, watcher가 복사 중인 파일을 먼저 처리하지 않습니다.
+디렉터리 안의 파일 전체에 같은 무음 감지 기준을 적용하려면:
+
+```powershell
+.\process-dir.ps1 "Y:\Best" -SilenceThresholdDb -35dB
+```
+
+디렉터리 전체를 전사 후 번역하려면:
+
+```powershell
+.\process-dir.ps1 "Y:\Best" -Translate
+```
+
+`process-file.ps1`과 `process-dir.ps1`은 기본적으로 완료까지 기다립니다. `-NoWait`를 붙이면 파일을 `input` 폴더에 제출한 뒤 바로 종료합니다. Docker 컨테이너가 떠 있지 않으면 제출 전에 `start.ps1`로 먼저 시작합니다. Docker Desktop 데몬이 응답하지 않는 경우에는 Docker Desktop 실행을 시도하고, 그래도 준비되지 않으면 명확한 오류를 보여줍니다. `-SilenceThresholdDb`를 붙이면 해당 제출 파일에만 `config.yaml`의 `silence_threshold_db`를 override합니다. 필요하면 `-MinSilenceDurationSeconds 0.4`처럼 최소 무음 길이도 함께 override할 수 있습니다. `process-dir.ps1`은 기본적으로 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 등 지원 확장자만 복사합니다. 파일은 `.part`로 먼저 복사한 뒤 이름을 바꾸므로, watcher가 복사 중인 파일을 먼저 처리하지 않습니다.
+
+`-Translate`는 완료를 기다린 뒤 `output\<name>.ja.srt`를 `output\<name>.ko.srt`로 번역합니다. 번역 전에는 `http://localhost:11434/api/tags`로 Ollama 서버와 모델 목록을 확인합니다. `-TranslateModelChoice`를 붙이면 Ollama 서버에 등록된 모델을 번호로 보여줍니다. 번역이 성공하면 사용한 모델을 `config/translation-defaults.json`에 저장하고, 다음부터는 `-Translate`만 붙여도 저장된 모델을 재사용합니다. 모델을 직접 지정하려면 `-TranslationModel "gemma3:4b"`처럼 넘기면 됩니다. 다른 PC나 컨테이너의 Ollama를 쓰려면 `-OllamaHost`와 `-OllamaPort`를 지정하세요.
+
+스크립트로 제출한 파일은 원본을 복사한 staged copy이므로, 성공 후 기본적으로 삭제됩니다. 예전처럼 처리된 복사본을 `archive`에 남기려면 `-KeepStagedCopy`를 붙이세요.
+
+```powershell
+.\process-file.ps1 "Y:\Best\sample.mp4" -KeepStagedCopy
+```
 
 ## 자막 분할 및 동기화 설정
 
@@ -244,3 +282,4 @@ docker run --rm -v "${PWD}:/workspace" -w /workspace kotoba-folder-watcher:2.2 p
 - 자막이 전반적으로 늦게 표시됨: `fallback_subtitle_start_delay_s`를 낮추세요. 예: `0.5`에서 `0.2`.
 - 짧은 오탐 증가: `filtered_short_phrases`에 문구를 추가하거나 `filtered_short_phrase_max_duration_s`를 조정하세요.
 - 길이에 상관없이 빼고 싶은 단독 문구가 있음: `filtered_always_phrases`에 문구를 추가하세요.
+- 특정 파일에서만 음성 누락이 많음: `process-file.ps1` 또는 `process-dir.ps1`에 `-SilenceThresholdDb -35dB`처럼 override를 붙이세요.

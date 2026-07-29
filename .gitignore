@@ -8,6 +8,7 @@ __pycache__/
 /failed/*
 /logs/*
 /models/*
+/config/translation-defaults.json
 !/input/.gitkeep
 !/processing/.gitkeep
 !/output/.gitkeep
@@ -15,4 +16,3 @@ __pycache__/
 !/failed/.gitkeep
 !/logs/.gitkeep
 !/models/.gitkeep
-

@@ -131,6 +131,7 @@ def tighten_fallback_subtitle_durations(
     padding_s: float,
 ) -> list[SubtitleChunk]:
     tightened: list[SubtitleChunk] = []
+    min_shorten_delta_s = 0.1
     for chunk in chunks:
         duration = chunk.end - chunk.start
         target_duration = _fallback_target_duration(
@@ -140,7 +141,7 @@ def tighten_fallback_subtitle_durations(
             chars_per_second,
             padding_s,
         )
-        if duration <= target_duration:
+        if duration <= target_duration or duration - target_duration < min_shorten_delta_s:
             tightened.append(chunk)
             continue
         tightened.append(SubtitleChunk(chunk.start, chunk.start + target_duration, chunk.text))

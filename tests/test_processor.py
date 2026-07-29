@@ -1,7 +1,15 @@
 from pathlib import Path
 
 from app.media import is_supported_media
-from app.processor import _offset_raw_chunks, extract_raw_chunks, unique_destination, validate_completion, write_json_atomic
+from app.processor import (
+    _offset_raw_chunks,
+    extract_raw_chunks,
+    load_job_options,
+    source_disposition_for,
+    unique_destination,
+    validate_completion,
+    write_json_atomic,
+)
 from app.transcriber import batch_size_sequence
 
 
@@ -43,6 +51,12 @@ def test_completion_validation() -> None:
     assert validate_completion(1000, 600, _Config()) == "suspicious_incomplete"
 
 
+def test_source_disposition_for_copied_success() -> None:
+    assert source_disposition_for("success", True, _Config()) == "deleted"
+    assert source_disposition_for("success", False, _Config()) == "archive"
+    assert source_disposition_for("suspicious_incomplete", True, _Config()) == "failed"
+
+
 def test_oom_batch_sequence() -> None:
     assert batch_size_sequence(8, [4, 2, 1]) == [8, 4, 2, 1]
     assert batch_size_sequence(6, [4, 2, 1]) == [6, 3, 1, 4, 2]
@@ -70,3 +84,40 @@ def test_offset_raw_chunks() -> None:
         {"timestamp": [10.0, 11.0], "text": "A"},
         {"timestamp": [12.0, 13.0], "text": "B"},
     ]
+
+
+def test_load_job_options_accepts_silence_overrides(tmp_path: Path) -> None:
+    options_path = tmp_path / "sample.mp4.options.json"
+    options_path.write_text(
+        (
+            '{"silence_threshold_db": "-35dB", '
+            '"min_silence_duration_s": 0.4, '
+            '"delete_source_on_success": true}'
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_job_options(options_path) == {
+        "silence_threshold_db": "-35dB",
+        "min_silence_duration_s": 0.4,
+        "delete_source_on_success": True,
+    }
+
+
+def test_load_job_options_accepts_utf8_bom(tmp_path: Path) -> None:
+    options_path = tmp_path / "sample.mp4.options.json"
+    options_path.write_text('{"silence_threshold_db": "-35dB"}', encoding="utf-8-sig")
+
+    assert load_job_options(options_path) == {"silence_threshold_db": "-35dB"}
+
+
+def test_load_job_options_rejects_invalid_threshold(tmp_path: Path) -> None:
+    options_path = tmp_path / "sample.mp4.options.json"
+    options_path.write_text('{"silence_threshold_db": "-35"}', encoding="utf-8")
+
+    try:
+        load_job_options(options_path)
+    except ValueError as exc:
+        assert "silence_threshold_db" in str(exc)
+    else:
+        raise AssertionError("Expected invalid silence threshold to fail")

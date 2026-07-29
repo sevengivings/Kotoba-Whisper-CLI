@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import time
 import uuid
@@ -58,6 +59,7 @@ class MediaProcessor:
             return ProcessOutcome("ignored", input_file, None, None)
         processing_file = unique_destination(self.config.paths.processing / input_file.name)
         shutil.move(str(input_file), str(processing_file))
+        move_job_options(input_file, processing_file)
         return self.process_processing_file(processing_file)
 
     def process_processing_file(self, processing_file: Path) -> ProcessOutcome:
@@ -67,6 +69,10 @@ class MediaProcessor:
         start_time = time.perf_counter()
         wav_path = self.config.paths.temp / f"{processing_file.stem}.{job_id}.wav"
         process_json_path = self.config.paths.output / f"{processing_file.stem}.process.json"
+        job_options_path = job_options_path_for(processing_file)
+        job_options: dict[str, Any] = {}
+        silence_threshold_db = self.config.inference.silence_threshold_db
+        min_silence_duration_s = self.config.inference.min_silence_duration_s
 
         LOGGER.info("Job %s started: %s attempt=%s", job_id, processing_file.name, attempt)
         if attempt > self.config.recovery.maximum_attempts:
@@ -82,9 +88,17 @@ class MediaProcessor:
             write_json_atomic(failure_path, failure)
             destination = unique_destination(self.config.paths.failed / processing_file.name)
             shutil.move(str(processing_file), str(destination))
+            job_options_path.unlink(missing_ok=True)
             LOGGER.error("Maximum attempts exceeded for %s", processing_file.name)
             return ProcessOutcome("failed", processing_file, destination, failure_path)
         try:
+            job_options = load_job_options(job_options_path)
+            silence_threshold_db = str(
+                job_options.get("silence_threshold_db", self.config.inference.silence_threshold_db)
+            )
+            min_silence_duration_s = float(
+                job_options.get("min_silence_duration_s", self.config.inference.min_silence_duration_s)
+            )
             cleanup_existing_parts(self.config.paths.output, processing_file.stem)
             media_duration = probe_duration_seconds(processing_file)
             LOGGER.info("Audio extraction started: %s", processing_file.name)
@@ -94,8 +108,8 @@ class MediaProcessor:
                 try:
                     silences = detect_silences(
                         wav_path,
-                        self.config.inference.silence_threshold_db,
-                        self.config.inference.min_silence_duration_s,
+                        silence_threshold_db,
+                        min_silence_duration_s,
                     )
                 except RuntimeError as exc:
                     LOGGER.warning("Silence detection skipped: %s", exc)
@@ -151,6 +165,8 @@ class MediaProcessor:
             chunks = filter_punctuation_only_chunks(chunks)
             last_end = chunks[-1].end if chunks else 0.0
             validation_status = validate_completion(media_duration, last_end, self.config)
+            delete_source_on_success = bool(job_options.get("delete_source_on_success", False))
+            source_disposition = source_disposition_for(validation_status, delete_source_on_success, self.config)
 
             raw_payload = {
                 "source_file": processing_file.name,
@@ -177,6 +193,10 @@ class MediaProcessor:
                 "word_timestamps_used": transcription.word_timestamps_used,
                 "silence_split": self.config.inference.silence_split,
                 "detected_silence_count": silence_count,
+                "silence_threshold_db": silence_threshold_db,
+                "min_silence_duration_s": min_silence_duration_s,
+                "job_options": job_options,
+                "source_disposition": source_disposition,
                 "vad_pre_split": self.config.inference.vad_pre_split,
                 "transcription_segment_count": segment_count,
                 "job_id": job_id,
@@ -190,9 +210,14 @@ class MediaProcessor:
                     if self.config.validation.suspicious_result_destination == "failed"
                     else self.config.paths.archive
                 )
-            destination = unique_destination(destination_root / processing_file.name)
-            shutil.move(str(processing_file), str(destination))
-            LOGGER.info("Source moved to %s: %s", destination_root.name, destination.name)
+            if source_disposition == "deleted":
+                destination = None
+                processing_file.unlink()
+                LOGGER.info("Copied source deleted after success: %s", processing_file.name)
+            else:
+                destination = unique_destination(destination_root / processing_file.name)
+                shutil.move(str(processing_file), str(destination))
+                LOGGER.info("Source moved to %s: %s", destination_root.name, destination.name)
             return ProcessOutcome(validation_status, processing_file, destination, process_json_path)
         except Exception as exc:
             LOGGER.exception("Job %s failed for %s: %s", job_id, processing_file, exc)
@@ -215,6 +240,10 @@ class MediaProcessor:
                 wav_path.unlink(missing_ok=True)
             except OSError:
                 LOGGER.warning("Could not remove temporary wav: %s", wav_path)
+            try:
+                job_options_path.unlink(missing_ok=True)
+            except OSError:
+                LOGGER.warning("Could not remove job options: %s", job_options_path)
 
     def _transcribe_audio(
         self,
@@ -293,6 +322,44 @@ def extract_raw_chunks(raw: dict[str, Any]) -> list[dict[str, Any]]:
     return collected
 
 
+def job_options_path_for(media_file: Path) -> Path:
+    return media_file.with_name(f"{media_file.name}.options.json")
+
+
+def move_job_options(input_file: Path, processing_file: Path) -> None:
+    source = job_options_path_for(input_file)
+    if not source.exists():
+        return
+    destination = job_options_path_for(processing_file)
+    shutil.move(str(source), str(destination))
+
+
+def load_job_options(options_path: Path) -> dict[str, Any]:
+    if not options_path.exists():
+        return {}
+    try:
+        raw = json.loads(options_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid job options {options_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f"Invalid job options {options_path}: expected object")
+
+    options: dict[str, Any] = {}
+    if "silence_threshold_db" in raw:
+        threshold = str(raw["silence_threshold_db"])
+        if not re.match(r"^-?\d+(\.\d+)?dB$", threshold):
+            raise ValueError("job option silence_threshold_db must look like -35dB")
+        options["silence_threshold_db"] = threshold
+    if "min_silence_duration_s" in raw:
+        min_silence_duration_s = float(raw["min_silence_duration_s"])
+        if min_silence_duration_s <= 0:
+            raise ValueError("job option min_silence_duration_s must be > 0")
+        options["min_silence_duration_s"] = min_silence_duration_s
+    if "delete_source_on_success" in raw:
+        options["delete_source_on_success"] = bool(raw["delete_source_on_success"])
+    return options
+
+
 def _offset_raw_chunks(raw_chunks: list[dict[str, Any]], offset_s: float) -> list[dict[str, Any]]:
     offset_chunks: list[dict[str, Any]] = []
     for chunk in raw_chunks:
@@ -333,6 +400,14 @@ def validate_completion(media_duration: float | None, last_end: float, config: A
     ):
         return "suspicious_incomplete"
     return "success"
+
+
+def source_disposition_for(validation_status: str, delete_source_on_success: bool, config: AppConfig) -> str:
+    if validation_status == "success" and delete_source_on_success:
+        return "deleted"
+    if validation_status == "suspicious_incomplete":
+        return config.validation.suspicious_result_destination
+    return "archive"
 
 
 def unique_destination(path: Path) -> Path:
