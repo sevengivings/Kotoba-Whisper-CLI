@@ -359,6 +359,26 @@ docker run --rm -v "${PWD}:/workspace" -w /workspace kotoba-folder-watcher:2.2 p
 .\test.ps1
 ```
 
+## 시간 예측
+
+전사 결과의 `*.process.json`에는 `processing_seconds`와 `realtime_factor`가 기록되고, 번역 결과의 `*.translation.json`에는 번역 `processing_seconds`와 `subtitle_count`가 기록됩니다. 기존 `output` 기록을 바탕으로 다음 작업 시간을 대략 예측할 수 있습니다.
+
+Windows:
+
+```powershell
+.\estimate-time.ps1
+.\estimate-time.ps1 -MediaDurationMinutes 120 -SubtitleCount 900
+.\estimate-time.ps1 -Recent 5
+```
+
+Ubuntu:
+
+```bash
+./estimate-time.sh
+./estimate-time.sh --media-duration-minutes 120 --subtitle-count 900
+./estimate-time.sh --recent 5
+```
+
 ## 자주 보는 문제
 
 - `CUDA is not available`: Docker GPU 설정, NVIDIA 드라이버, WSL2 GPU 지원을 확인하세요.

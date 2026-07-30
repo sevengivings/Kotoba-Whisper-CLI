@@ -102,8 +102,11 @@ def main() -> int:
         "processing_seconds": round(time.time() - started, 3),
     }
     metadata_path = output_srt.with_suffix(".translation.json")
-    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    metadata_text = json.dumps(metadata, ensure_ascii=False, indent=2)
+    metadata_path.write_text(metadata_text, encoding="utf-8")
     print(f"[Info] Translation saved: {output_srt}")
+    print("[Info] Translation metadata:")
+    print(metadata_text)
     return 0
 
 
