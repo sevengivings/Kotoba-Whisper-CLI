@@ -22,6 +22,14 @@ class SilenceSpan:
 
 
 @dataclass(frozen=True)
+class SpeechStartRefinement:
+    spans: list[SilenceSpan]
+    adjusted_count: int
+    average_adjustment_s: float
+    maximum_adjustment_s: float
+
+
+@dataclass(frozen=True)
 class SilenceThresholdEstimate:
     threshold_db: str
     noise_floor_db: float
@@ -160,6 +168,58 @@ def estimate_silence_threshold(
     )
 
 
+def refine_speech_span_starts(
+    wav_path: Path,
+    spans: list[SilenceSpan],
+    silence_threshold_db: str,
+    threshold_offset_db: float,
+    pre_roll_s: float,
+    frame_duration_s: float,
+    min_consecutive_frames: int,
+    max_adjustment_s: float,
+) -> SpeechStartRefinement:
+    if not spans:
+        return SpeechStartRefinement([], 0, 0.0, 0.0)
+    if frame_duration_s <= 0 or min_consecutive_frames < 1 or max_adjustment_s <= 0:
+        return SpeechStartRefinement(spans, 0, 0.0, 0.0)
+
+    onset_threshold_db = _parse_db(silence_threshold_db) + threshold_offset_db
+    refined: list[SilenceSpan] = []
+    adjustments: list[float] = []
+    for span in spans:
+        search_end = min(span.end, span.start + max_adjustment_s)
+        onset = _find_first_speech_frame(
+            wav_path,
+            span.start,
+            search_end,
+            onset_threshold_db,
+            frame_duration_s,
+            min_consecutive_frames,
+        )
+        if onset is None:
+            refined.append(span)
+            continue
+        new_start = max(span.start, min(onset - pre_roll_s, span.end))
+        if span.end - new_start <= 0:
+            refined.append(span)
+            continue
+        adjustment = new_start - span.start
+        if adjustment <= 0:
+            refined.append(span)
+            continue
+        refined.append(SilenceSpan(new_start, span.end))
+        adjustments.append(adjustment)
+
+    if not adjustments:
+        return SpeechStartRefinement(refined, 0, 0.0, 0.0)
+    return SpeechStartRefinement(
+        refined,
+        len(adjustments),
+        round(sum(adjustments) / len(adjustments), 3),
+        round(max(adjustments), 3),
+    )
+
+
 def parse_silencedetect_output(stderr: str) -> list[SilenceSpan]:
     silences: list[SilenceSpan] = []
     current_start: float | None = None
@@ -177,6 +237,44 @@ def parse_silencedetect_output(stderr: str) -> list[SilenceSpan]:
     return silences
 
 
+def _find_first_speech_frame(
+    wav_path: Path,
+    start_s: float,
+    end_s: float,
+    threshold_db: float,
+    frame_duration_s: float,
+    min_consecutive_frames: int,
+) -> float | None:
+    if end_s <= start_s:
+        return None
+    with wave.open(str(wav_path), "rb") as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        frame_rate = wav_file.getframerate()
+        if sample_width != 2:
+            raise RuntimeError(f"Speech start refinement expects 16-bit PCM WAV: {wav_path}")
+        samples_per_frame = max(1, int(frame_rate * frame_duration_s))
+        start_frame = max(0, int(start_s * frame_rate))
+        end_frame = max(start_frame, int(end_s * frame_rate))
+        wav_file.setpos(min(start_frame, wav_file.getnframes()))
+        consecutive = 0
+        current_frame = start_frame
+        while current_frame < end_frame:
+            raw = wav_file.readframes(min(samples_per_frame, end_frame - current_frame))
+            if not raw:
+                break
+            level = _pcm16_dbfs(raw, channels)
+            if level >= threshold_db:
+                consecutive += 1
+                if consecutive >= min_consecutive_frames:
+                    onset_frame = current_frame - samples_per_frame * (min_consecutive_frames - 1)
+                    return max(start_s, onset_frame / frame_rate)
+            else:
+                consecutive = 0
+            current_frame += len(raw) // (sample_width * channels)
+    return None
+
+
 def _wav_frame_dbfs(wav_path: Path, frame_duration_s: float) -> list[float]:
     levels: list[float] = []
     with wave.open(str(wav_path), "rb") as wav_file:
@@ -190,19 +288,29 @@ def _wav_frame_dbfs(wav_path: Path, frame_duration_s: float) -> list[float]:
             raw = wav_file.readframes(samples_per_frame)
             if not raw:
                 break
-            samples = array("h")
-            samples.frombytes(raw)
-            if channels > 1:
-                samples = array("h", samples[::channels])
-            if not samples:
-                continue
-            mean_square = sum(sample * sample for sample in samples) / len(samples)
-            if mean_square <= 0:
-                levels.append(-100.0)
-                continue
-            rms = math.sqrt(mean_square)
-            levels.append(20.0 * math.log10(rms / 32768.0))
+            levels.append(_pcm16_dbfs(raw, channels))
     return levels
+
+
+def _pcm16_dbfs(raw: bytes, channels: int) -> float:
+    samples = array("h")
+    samples.frombytes(raw)
+    if channels > 1:
+        samples = array("h", samples[::channels])
+    if not samples:
+        return -100.0
+    mean_square = sum(sample * sample for sample in samples) / len(samples)
+    if mean_square <= 0:
+        return -100.0
+    rms = math.sqrt(mean_square)
+    return 20.0 * math.log10(rms / 32768.0)
+
+
+def _parse_db(value: str) -> float:
+    match = re.match(r"^(-?\d+(?:\.\d+)?)dB$", value)
+    if not match:
+        raise ValueError(f"Invalid dB value: {value}")
+    return float(match.group(1))
 
 
 def _percentile(sorted_values: list[float], percentile: float) -> float:

@@ -19,6 +19,7 @@ from app.media import (
     extract_audio_segment,
     is_supported_media,
     probe_duration_seconds,
+    refine_speech_span_starts,
     speech_spans_from_silences,
 )
 from app.recovery import increment_attempt
@@ -126,11 +127,12 @@ class MediaProcessor:
                 except RuntimeError as exc:
                     LOGGER.warning("Silence detection skipped: %s", exc)
             silence_count = len(silences)
-            transcription, raw_chunks, segment_count = self._transcribe_audio(
+            transcription, raw_chunks, segment_count, start_refinement = self._transcribe_audio(
                 wav_path,
                 media_duration,
                 silences,
                 job_id,
+                silence_threshold_db,
             )
             chunks = normalize_chunks(raw_chunks)
             if transcription.word_timestamps_used:
@@ -220,6 +222,7 @@ class MediaProcessor:
                 "job_options": job_options,
                 "source_disposition": source_disposition,
                 "vad_pre_split": self.config.inference.vad_pre_split,
+                "vad_segment_start_refinement": start_refinement,
                 "transcription_segment_count": segment_count,
                 "job_id": job_id,
             }
@@ -273,10 +276,17 @@ class MediaProcessor:
         media_duration: float | None,
         silences: list[Any],
         job_id: str,
-    ) -> tuple[Any, list[dict[str, Any]], int]:
+        silence_threshold_db: str,
+    ) -> tuple[Any, list[dict[str, Any]], int, dict[str, Any]]:
+        no_refinement = {
+            "enabled": self.config.inference.vad_refine_segment_start,
+            "adjusted_count": 0,
+            "average_adjustment_s": 0.0,
+            "maximum_adjustment_s": 0.0,
+        }
         if not self.config.inference.vad_pre_split or media_duration is None or not silences:
             transcription = self.transcriber.transcribe(str(wav_path))
-            return transcription, extract_raw_chunks(transcription.raw), 1
+            return transcription, extract_raw_chunks(transcription.raw), 1, no_refinement
 
         spans = speech_spans_from_silences(
             media_duration,
@@ -288,17 +298,51 @@ class MediaProcessor:
         )
         if not spans:
             transcription = self.transcriber.transcribe(str(wav_path))
-            return transcription, extract_raw_chunks(transcription.raw), 1
+            return transcription, extract_raw_chunks(transcription.raw), 1, no_refinement
+
+        offset_spans = spans
+        start_refinement = no_refinement
+        if self.config.inference.vad_refine_segment_start:
+            refinement = refine_speech_span_starts(
+                wav_path,
+                spans,
+                silence_threshold_db,
+                self.config.inference.vad_refine_threshold_offset_db,
+                self.config.inference.vad_refine_pre_roll_s,
+                self.config.inference.vad_refine_frame_duration_s,
+                self.config.inference.vad_refine_min_consecutive_frames,
+                self.config.inference.vad_refine_max_adjustment_s,
+            )
+            offset_spans = refinement.spans
+            start_refinement = {
+                "enabled": True,
+                "adjusted_count": refinement.adjusted_count,
+                "average_adjustment_s": refinement.average_adjustment_s,
+                "maximum_adjustment_s": refinement.maximum_adjustment_s,
+            }
+            if refinement.adjusted_count:
+                LOGGER.info(
+                    "VAD segment start refinement: adjusted=%s avg=%.3fs max=%.3fs",
+                    refinement.adjusted_count,
+                    refinement.average_adjustment_s,
+                    refinement.maximum_adjustment_s,
+                )
 
         LOGGER.info("VAD pre-split transcription: segments=%s", len(spans))
         all_chunks: list[dict[str, Any]] = []
         last_transcription = None
-        for index, span in enumerate(spans, 1):
+        for index, (span, offset_span) in enumerate(zip(spans, offset_spans), 1):
             segment_path = self.config.paths.temp / f"{wav_path.stem}.{job_id}.{index:04d}.wav"
             try:
                 extract_audio_segment(wav_path, segment_path, span.start, span.end)
                 last_transcription = self.transcriber.transcribe(str(segment_path))
-                all_chunks.extend(_offset_raw_chunks(extract_raw_chunks(last_transcription.raw), span.start))
+                all_chunks.extend(
+                    _offset_raw_chunks(
+                        extract_raw_chunks(last_transcription.raw),
+                        span.start,
+                        minimum_start_s=offset_span.start,
+                    )
+                )
             finally:
                 try:
                     segment_path.unlink(missing_ok=True)
@@ -307,8 +351,8 @@ class MediaProcessor:
 
         if last_transcription is None:
             last_transcription = self.transcriber.transcribe(str(wav_path))
-            return last_transcription, extract_raw_chunks(last_transcription.raw), 1
-        return last_transcription, all_chunks, len(spans)
+            return last_transcription, extract_raw_chunks(last_transcription.raw), 1, no_refinement
+        return last_transcription, all_chunks, len(spans), start_refinement
 
     def _write_outputs(
         self,
@@ -384,7 +428,11 @@ def load_job_options(options_path: Path) -> dict[str, Any]:
     return options
 
 
-def _offset_raw_chunks(raw_chunks: list[dict[str, Any]], offset_s: float) -> list[dict[str, Any]]:
+def _offset_raw_chunks(
+    raw_chunks: list[dict[str, Any]],
+    offset_s: float,
+    minimum_start_s: float | None = None,
+) -> list[dict[str, Any]]:
     offset_chunks: list[dict[str, Any]] = []
     for chunk in raw_chunks:
         timestamp = chunk.get("timestamp") or chunk.get("timestamps")
@@ -394,6 +442,10 @@ def _offset_raw_chunks(raw_chunks: list[dict[str, Any]], offset_s: float) -> lis
             start, end = _offset_timestamp(timestamp, offset_s)
         except (TypeError, ValueError):
             continue
+        if minimum_start_s is not None and start < minimum_start_s:
+            start = minimum_start_s
+            if end <= start:
+                end = start + 0.01
         copied = dict(chunk)
         copied["timestamp"] = [start, end]
         copied.pop("timestamps", None)

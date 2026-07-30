@@ -1,4 +1,8 @@
-from app.media import parse_silencedetect_output, speech_spans_from_silences
+import wave
+from array import array
+from pathlib import Path
+
+from app.media import SilenceSpan, parse_silencedetect_output, refine_speech_span_starts, speech_spans_from_silences
 
 
 def test_parse_silencedetect_output() -> None:
@@ -54,3 +58,30 @@ def test_speech_spans_from_silences_keeps_short_speech_with_padding() -> None:
     )
 
     assert [(round(span.start, 3), round(span.end, 3)) for span in spans] == [(16.489, 17.863)]
+
+
+def test_refine_speech_span_starts_moves_start_to_onset(tmp_path: Path) -> None:
+    wav_path = tmp_path / "sample.wav"
+    samples = array("h")
+    samples.extend([0] * 16000)
+    samples.extend([3000] * 16000)
+    with wave.open(str(wav_path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(16000)
+        wav_file.writeframes(samples.tobytes())
+
+    refinement = refine_speech_span_starts(
+        wav_path,
+        [SilenceSpan(0.0, 2.0)],
+        "-42dB",
+        threshold_offset_db=3.0,
+        pre_roll_s=0.08,
+        frame_duration_s=0.03,
+        min_consecutive_frames=2,
+        max_adjustment_s=2.0,
+    )
+
+    assert refinement.adjusted_count == 1
+    assert round(refinement.spans[0].start, 2) == 0.91
+    assert refinement.spans[0].end == 2.0

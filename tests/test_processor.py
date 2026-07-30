@@ -88,6 +88,22 @@ def test_offset_raw_chunks() -> None:
     ]
 
 
+def test_offset_raw_chunks_clamps_early_start() -> None:
+    chunks = _offset_raw_chunks(
+        [
+            {"timestamp": [0, 1], "text": "A"},
+            {"timestamp": [2, 3], "text": "B"},
+        ],
+        10,
+        minimum_start_s=10.5,
+    )
+
+    assert chunks == [
+        {"timestamp": [10.5, 11.0], "text": "A"},
+        {"timestamp": [12.0, 13.0], "text": "B"},
+    ]
+
+
 def test_load_job_options_accepts_silence_overrides(tmp_path: Path) -> None:
     options_path = tmp_path / "sample.mp4.options.json"
     options_path.write_text(

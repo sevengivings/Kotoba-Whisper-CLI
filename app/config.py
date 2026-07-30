@@ -55,6 +55,12 @@ class InferenceConfig:
     vad_min_speech_duration_s: float
     vad_padding_s: float
     vad_merge_gap_s: float
+    vad_refine_segment_start: bool
+    vad_refine_threshold_offset_db: float
+    vad_refine_pre_roll_s: float
+    vad_refine_frame_duration_s: float
+    vad_refine_min_consecutive_frames: int
+    vad_refine_max_adjustment_s: float
     subtitle_merge_gap_s: float
     subtitle_max_merged_duration_s: float
     subtitle_max_merged_chars: int
@@ -183,6 +189,12 @@ def load_config(config_path: Path) -> AppConfig:
                 vad_min_speech_duration_s=float(inference.get("vad_min_speech_duration_s", 0.25)),
                 vad_padding_s=float(inference.get("vad_padding_s", 0.4)),
                 vad_merge_gap_s=float(inference.get("vad_merge_gap_s", 2.0)),
+                vad_refine_segment_start=bool(inference.get("vad_refine_segment_start", True)),
+                vad_refine_threshold_offset_db=float(inference.get("vad_refine_threshold_offset_db", 3.0)),
+                vad_refine_pre_roll_s=float(inference.get("vad_refine_pre_roll_s", 0.08)),
+                vad_refine_frame_duration_s=float(inference.get("vad_refine_frame_duration_s", 0.03)),
+                vad_refine_min_consecutive_frames=int(inference.get("vad_refine_min_consecutive_frames", 2)),
+                vad_refine_max_adjustment_s=float(inference.get("vad_refine_max_adjustment_s", 3.0)),
                 subtitle_merge_gap_s=float(inference.get("subtitle_merge_gap_s", 2.0)),
                 subtitle_max_merged_duration_s=float(inference.get("subtitle_max_merged_duration_s", 8.0)),
                 subtitle_max_merged_chars=int(inference.get("subtitle_max_merged_chars", 80)),
@@ -259,6 +271,16 @@ def validate_config(config: AppConfig) -> None:
         raise ValueError("inference.vad_padding_s must be >= 0")
     if config.inference.vad_merge_gap_s < 0:
         raise ValueError("inference.vad_merge_gap_s must be >= 0")
+    if config.inference.vad_refine_threshold_offset_db < 0:
+        raise ValueError("inference.vad_refine_threshold_offset_db must be >= 0")
+    if config.inference.vad_refine_pre_roll_s < 0:
+        raise ValueError("inference.vad_refine_pre_roll_s must be >= 0")
+    if config.inference.vad_refine_frame_duration_s <= 0:
+        raise ValueError("inference.vad_refine_frame_duration_s must be > 0")
+    if config.inference.vad_refine_min_consecutive_frames < 1:
+        raise ValueError("inference.vad_refine_min_consecutive_frames must be >= 1")
+    if config.inference.vad_refine_max_adjustment_s <= 0:
+        raise ValueError("inference.vad_refine_max_adjustment_s must be > 0")
     if config.inference.subtitle_merge_gap_s < 0:
         raise ValueError("inference.subtitle_merge_gap_s must be >= 0")
     if config.inference.subtitle_max_merged_duration_s <= 0:

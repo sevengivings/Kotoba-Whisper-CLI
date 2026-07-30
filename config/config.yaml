@@ -39,6 +39,12 @@ inference:
   vad_min_speech_duration_s: 0.25
   vad_padding_s: 0.4
   vad_merge_gap_s: 0.0
+  vad_refine_segment_start: true
+  vad_refine_threshold_offset_db: 3.0
+  vad_refine_pre_roll_s: 0.08
+  vad_refine_frame_duration_s: 0.03
+  vad_refine_min_consecutive_frames: 2
+  vad_refine_max_adjustment_s: 3.0
   subtitle_merge_gap_s: 0.5
   subtitle_max_merged_duration_s: 6.0
   subtitle_max_merged_chars: 42

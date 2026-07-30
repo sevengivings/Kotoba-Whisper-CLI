@@ -234,6 +234,12 @@ inference:
   vad_min_speech_duration_s: 0.25
   vad_padding_s: 0.4
   vad_merge_gap_s: 0.0
+  vad_refine_segment_start: true
+  vad_refine_threshold_offset_db: 3.0
+  vad_refine_pre_roll_s: 0.08
+  vad_refine_frame_duration_s: 0.03
+  vad_refine_min_consecutive_frames: 2
+  vad_refine_max_adjustment_s: 3.0
 
   subtitle_merge_gap_s: 0.5
   subtitle_max_merged_duration_s: 6.0
@@ -257,6 +263,10 @@ inference:
 - `vad_min_speech_duration_s`: 짧은 발화도 버리지 않기 위한 최소 발화 길이입니다.
 - `vad_padding_s`: VAD 구간 앞뒤에 붙이는 여유 시간입니다.
 - `vad_merge_gap_s`: 가까운 발화 구간을 하나의 전사 조각으로 병합하는 간격입니다.
+- `vad_refine_segment_start`: VAD segment 안에서 실제 음량이 올라오는 첫 지점을 찾아 자막 시작이 너무 일찍 뜨는 문제를 줄입니다. 오디오는 기존 padding을 유지해 추출하지만, 자막 timestamp 시작점은 보정된 onset 이후로 늦춥니다.
+- `vad_refine_threshold_offset_db`: onset 판정에 사용할 기준입니다. 현재 `silence_threshold_db`보다 이 dB만큼 더 큰 소리를 실제 발화 시작 후보로 봅니다.
+- `vad_refine_pre_roll_s`: 찾은 onset보다 자막을 약간 먼저 띄우기 위한 여유 시간입니다.
+- `vad_refine_max_adjustment_s`: segment 시작점을 최대 몇 초까지 늦출 수 있는지 제한합니다.
 - `subtitle_merge_gap_s`: 전사 후 가까운 자막 조각을 합치는 간격입니다.
 - `subtitle_max_merged_duration_s`: 병합된 자막의 최대 길이입니다.
 - `fallback_subtitle_max_duration_s`: word timestamp fallback 시 자막 한 줄의 최대 표시 시간입니다.
