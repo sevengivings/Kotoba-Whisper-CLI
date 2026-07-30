@@ -97,11 +97,11 @@ docker logs --tail 50 kotoba-folder-watcher
 특정 파일만 무음 감지 기준을 바꾸려면:
 
 ```powershell
-.\process-file.ps1 "Y:\Best\sample.mp4" -SilenceThresholdDb -35dB
+.\process-file.ps1 "Y:\Best\sample.mp4" -SilenceThresholdDb -45dB
 ```
 
 ```bash
-./process-file.sh "/mnt/best/sample.mp4" --silence-threshold-db -35dB
+./process-file.sh "/mnt/best/sample.mp4" --silence-threshold-db -45dB
 ```
 
 파일의 전체 음량 분포를 보고 무음 감지 기준을 자동으로 잡으려면:
@@ -173,11 +173,11 @@ docker logs --tail 50 kotoba-folder-watcher
 디렉터리 안의 파일 전체에 같은 무음 감지 기준을 적용하려면:
 
 ```powershell
-.\process-dir.ps1 "Y:\Best" -SilenceThresholdDb -35dB
+.\process-dir.ps1 "Y:\Best" -SilenceThresholdDb -45dB
 ```
 
 ```bash
-./process-dir.sh "/mnt/best" --silence-threshold-db -35dB
+./process-dir.sh "/mnt/best" --silence-threshold-db -45dB
 ```
 
 디렉터리 안의 각 파일마다 무음 감지 기준을 자동으로 잡으려면:
@@ -202,7 +202,9 @@ docker logs --tail 50 kotoba-folder-watcher
 
 `process-file.ps1`/`process-dir.ps1`과 `process-file.sh`/`process-dir.sh`는 기본적으로 완료까지 기다립니다. `-NoWait` 또는 `--no-wait`를 붙이면 파일을 `input` 폴더에 제출한 뒤 바로 종료합니다. Docker 컨테이너가 떠 있지 않으면 제출 전에 `docker compose up -d --build`로 먼저 시작합니다. Docker 데몬이 응답하지 않는 경우에는 명확한 오류를 보여줍니다. `-SilenceThresholdDb` 또는 `--silence-threshold-db`를 붙이면 해당 제출 파일에만 `config.yaml`의 `silence_threshold_db`를 override합니다. `-AutoSilenceThreshold` 또는 `--auto-silence-threshold`를 붙이면 컨테이너 안에서 추출된 WAV의 frame RMS 분포를 분석해 파일별 `silence_threshold_db`를 자동으로 선택합니다. 두 옵션은 동시에 쓸 수 없습니다. 필요하면 `-MinSilenceDurationSeconds 0.4` 또는 `--min-silence-duration-seconds 0.4`처럼 최소 무음 길이도 함께 override할 수 있습니다. `process-dir` 스크립트는 기본적으로 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 등 지원 확장자만 복사합니다. 파일은 `.part`로 먼저 복사한 뒤 이름을 바꾸므로, watcher가 복사 중인 파일을 먼저 처리하지 않습니다.
 
-`-Translate`는 완료를 기다린 뒤 `output\<name>.ja.srt`를 `output\<name>.ko.srt`로 번역합니다. 번역 전에는 `http://localhost:11434/api/tags`로 Ollama 서버와 모델 목록을 확인합니다. `-TranslateModelChoice`를 붙이면 Ollama 서버에 등록된 모델을 번호로 보여줍니다. 번역이 성공하면 사용한 모델을 `config/translation-defaults.json`에 저장하고, 다음부터는 `-Translate`만 붙여도 저장된 모델을 재사용합니다. 모델을 직접 지정하려면 `-TranslationModel "gemma3:4b"`처럼 넘기면 됩니다. 다른 PC나 컨테이너의 Ollama를 쓰려면 `-OllamaHost`와 `-OllamaPort`를 지정하세요.
+대기 중에는 `processing\<name>.progress.json`을 읽어 현재 단계를 표시합니다. 예를 들어 음성 추출, 자동 무음 기준 분석, 무음 구간 탐지, VAD segment별 전사 진행률과 경과 시간이 표시됩니다. 단일 파일 처리 또는 `process-dir`에서 남은 파일이 1개일 때는 같은 줄에서 갱신하고, 여러 파일이 남아 있으면 파일별 진행 상태를 여러 줄로 표시합니다.
+
+`-Translate`는 완료를 기다린 뒤 `output\<name>.ja.srt`를 `output\<name>.ko.srt`로 번역합니다. 번역 전에는 `http://localhost:11434/api/tags`로 Ollama 서버와 모델 목록을 확인합니다. `-TranslateModelChoice`를 붙이면 Ollama 서버에 등록된 모델을 번호로 보여줍니다. 번역이 성공하면 사용한 모델을 `config/translation-defaults.json`에 저장하고, 다음부터는 `-Translate`만 붙여도 저장된 모델을 재사용합니다. 모델을 직접 지정하려면 `-TranslationModel "gemma3:4b"`처럼 넘기면 됩니다. 다른 PC나 컨테이너의 Ollama를 쓰려면 `-OllamaHost`와 `-OllamaPort`를 지정하세요. `process-file`/`process-dir`로 번역까지 성공하면 한국어 자막을 원본 영상 폴더에도 복사합니다. 같은 이름의 자막이 없으면 `영상파일명.srt`로, 이미 있으면 `영상파일명.ko.srt`로 저장하며, 그 파일도 있으면 timestamp를 붙여 덮어쓰지 않습니다.
 
 번역은 기본적으로 자막 50개씩 묶어 처리합니다. 묶음 단위로 진행 상황이 표시되며, 더 크거나 작게 나누려면 `-BatchSize 100` 또는 `--batch-size 100`처럼 지정하세요. 한 줄씩 번역하려면 PowerShell에서는 `-NoBatchTranslate`, bash/직접 실행에서는 `--no-batch-translate`를 사용합니다. `--batch-translate`와 `-BatchTranslate`는 기존 명령 호환용으로 남아 있습니다. `--text-split-size`는 긴 프롬프트를 더 잘게 자르고 싶을 때만 추가로 쓰는 글자 수 제한입니다.
 
@@ -225,7 +227,7 @@ inference:
   return_timestamps: true
   word_timestamps: true
   silence_split: true
-  silence_threshold_db: -32dB
+  silence_threshold_db: -42dB
   min_silence_duration_s: 0.5
   min_subtitle_duration_s: 0.8
 
@@ -255,8 +257,8 @@ inference:
 
 - `silence_threshold_db`: 무음 판정 기준입니다. 값이 낮을수록 작은 소리도 발화로 잡습니다.
   - `-30dB`: 무음 판정이 강해져 작은 발화를 놓칠 수 있음
-  - `-32dB`: 현재 권장값
-  - `-35dB`: 작은 발화 보존에 조금 더 유리
+  - `-42dB`: 현재 권장값
+  - `-45dB`: 작은 발화 보존에 조금 더 유리
   - `-40dB` 이하: 작은 소리 보존에 유리하지만 긴 segment와 오탐 가능성 증가
 - `-AutoSilenceThreshold`: 파일 전체 음량 분포의 하위 20%를 배경 소음, 상위 85%를 음성 후보로 보고 `silence_threshold_db`를 자동 선택합니다. 선택된 값과 분석 정보는 `output\<name>.process.json`의 `auto_silence_threshold`에 기록됩니다.
 - `vad_pre_split`: 전사 전에 발화 구간을 먼저 나누어 Whisper에 넣습니다.
@@ -288,7 +290,7 @@ inference:
 }
 ```
 
-`threshold_db`가 `-42dB`에 자주 붙으면 해당 영상들이 전체적으로 작은 음성 위주라는 뜻입니다. 이 경우 자동 기준을 쓰는 편이 기본 `-32dB`보다 작은 발화를 보존하는 데 유리합니다.
+`threshold_db`가 기본값보다 더 낮게 자주 붙으면 해당 영상들이 전체적으로 작은 음성 위주라는 뜻입니다. 이 경우 자동 기준을 쓰는 편이 고정 기준보다 작은 발화를 보존하는 데 유리합니다.
 
 word timestamp가 성공하면 단어 단위 시간으로 자막을 묶습니다. 실패하면 segment timestamp로 자동 fallback하며, 이때 짧은 문장이 10초 이상 떠 있는 문제를 줄이기 위해 문장 길이 기반으로 표시 시간을 줄이고 필요하면 시작 시간을 약간 늦춥니다.
 
@@ -394,11 +396,11 @@ Ubuntu:
 - `CUDA is not available`: Docker GPU 설정, NVIDIA 드라이버, WSL2 GPU 지원을 확인하세요.
 - `GPU memory exhausted`: `inference.batch_size`를 낮추세요.
 - `Maximum attempts exceeded`: `processing/.attempts.json`의 해당 파일 항목을 초기화하세요.
-- 작은 소리 누락: `silence_threshold_db`를 더 낮추세요. 예: `-32dB`에서 `-35dB`.
+- 작은 소리 누락: `silence_threshold_db`를 더 낮추세요. 예: `-42dB`에서 `-45dB`.
 - 자막이 너무 오래 표시됨: `fallback_subtitle_max_duration_s`를 낮추거나 `fallback_subtitle_chars_per_second`를 높이세요.
 - 자막이 너무 빨리 사라짐: `fallback_subtitle_chars_per_second`를 낮추거나 `fallback_subtitle_padding_s`를 높이세요.
 - 자막이 전반적으로 빠르게 표시됨: `fallback_subtitle_start_delay_s`를 높이세요. 예: `0.5`에서 `0.8`.
 - 자막이 전반적으로 늦게 표시됨: `fallback_subtitle_start_delay_s`를 낮추세요. 예: `0.5`에서 `0.2`.
 - 짧은 오탐 증가: `filtered_short_phrases`에 문구를 추가하거나 `filtered_short_phrase_max_duration_s`를 조정하세요.
 - 길이에 상관없이 빼고 싶은 단독 문구가 있음: `filtered_always_phrases`에 문구를 추가하세요.
-- 특정 파일에서만 음성 누락이 많음: `process-file.ps1` 또는 `process-dir.ps1`에 `-SilenceThresholdDb -35dB`처럼 override를 붙이세요.
+- 특정 파일에서만 음성 누락이 많음: `process-file.ps1` 또는 `process-dir.ps1`에 `-SilenceThresholdDb -45dB`처럼 override를 붙이세요.

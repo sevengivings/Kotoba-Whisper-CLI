@@ -94,3 +94,20 @@ def test_make_batches_can_still_limit_by_text_size() -> None:
     batches = module.make_batches(texts, batch_size=50, text_split_size=11)
 
     assert batches == [[0], [1], [2]]
+
+
+def test_progress_message_includes_elapsed_and_eta() -> None:
+    module = load_translate_module()
+
+    message = module.progress_message(
+        prefix="[Info] Batch translated",
+        current=2,
+        total=4,
+        item="subtitles 51-100",
+        started=module.time.time() - 20,
+    )
+
+    assert "[Info] Batch translated 2/4 (50.0%)" in message
+    assert "subtitles 51-100" in message
+    assert "elapsed" in message
+    assert "ETA" in message

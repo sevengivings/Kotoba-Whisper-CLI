@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -16,6 +17,23 @@ OLLAMA_OPTIONS = {
     "repeat_penalty": 1.05,
     "num_ctx": 8192,
 }
+
+
+class ProgressPrinter:
+    def __init__(self) -> None:
+        self._last_width = 0
+
+    def update(self, message: str) -> None:
+        width = max(self._last_width, len(message))
+        sys.stdout.write("\r" + message.ljust(width))
+        sys.stdout.flush()
+        self._last_width = len(message)
+
+    def finish(self) -> None:
+        if self._last_width:
+            sys.stdout.write("\r" + (" " * self._last_width) + "\r")
+            sys.stdout.flush()
+            self._last_width = 0
 
 SUBTITLE_STYLE_PROMPT = (
     "Many subtitles are short everyday Japanese, casual reactions, interjections, or adult video dialogue. "
@@ -159,6 +177,8 @@ def translate_entries(
 ) -> list[str]:
     texts = [entry["text"] for entry in entries]
     translated = [""] * len(texts)
+    progress = ProgressPrinter()
+    started = time.time()
     if batch_translate:
         if batch_size <= 0:
             raise RuntimeError("--batch-size must be greater than 0")
@@ -168,7 +188,7 @@ def translate_entries(
         for batch_no, batch in enumerate(batches, 1):
             first_subtitle = batch[0] + 1
             last_subtitle = batch[-1] + 1
-            print(
+            progress.update(
                 f"[Info] Translating batch {batch_no}/{len(batches)}: "
                 f"subtitles {first_subtitle}-{last_subtitle}"
             )
@@ -186,23 +206,72 @@ def translate_entries(
             parsed = parse_batch_translation(result, batch)
             for index, translated_text in parsed.items():
                 translated[index] = translated_text
+            progress.update(
+                progress_message(
+                    prefix="[Info] Batch translated",
+                    current=batch_no,
+                    total=len(batches),
+                    item=f"subtitles {first_subtitle}-{last_subtitle}",
+                    started=started,
+                )
+            )
 
         missing = [index for index, value in enumerate(translated) if not value.strip()]
         if missing:
+            progress.finish()
             print(f"[Warning] Retrying {len(missing)} missing subtitle(s) one by one")
-            for index in missing:
+            retry_started = time.time()
+            for retry_no, index in enumerate(missing, 1):
+                progress.update(
+                    progress_message(
+                        prefix="[Info] Retrying missing subtitle",
+                        current=retry_no,
+                        total=len(missing),
+                        item=f"subtitle {index + 1}",
+                        started=retry_started,
+                    )
+                )
                 translated[index] = translate_text_ollama(
                     host, port, model, source_lang, target_lang, texts[index], timeout_seconds, korean_style
                 )
     else:
         for index, text in enumerate(texts, 1):
-            print(f"[Info] Translating line {index}/{len(texts)}")
+            progress.update(
+                progress_message(
+                    prefix="[Info] Translating line",
+                    current=index,
+                    total=len(texts),
+                    item=f"subtitle {index}",
+                    started=started,
+                )
+            )
             translated[index - 1] = translate_text_ollama(
                 host, port, model, source_lang, target_lang, text, timeout_seconds, korean_style
             )
 
+    progress.finish()
     validate_translations(translated)
     return translated
+
+
+def progress_message(prefix: str, current: int, total: int, item: str, started: float) -> str:
+    elapsed = time.time() - started
+    percent = (current / total) * 100 if total else 0.0
+    eta = (elapsed / current) * (total - current) if current else 0.0
+    return (
+        f"{prefix} {current}/{total} ({percent:.1f}%) | "
+        f"{item} | elapsed {format_duration(elapsed)} | ETA {format_duration(eta)}"
+    )
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = max(0, int(round(seconds)))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
 
 
 def make_batches(texts: list[str], batch_size: int, text_split_size: int) -> list[list[int]]:

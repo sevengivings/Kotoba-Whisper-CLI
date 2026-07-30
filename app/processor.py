@@ -6,6 +6,7 @@ import re
 import shutil
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,7 @@ from app.subtitle import (
 from app.transcriber import KotobaTranscriber
 
 LOGGER = logging.getLogger(__name__)
+ProgressCallback = Callable[[str, str, int | None, int | None, dict[str, Any] | None], None]
 
 
 @dataclass(frozen=True)
@@ -70,13 +72,43 @@ class MediaProcessor:
         started = now_iso()
         start_time = time.perf_counter()
         wav_path = self.config.paths.temp / f"{processing_file.stem}.{job_id}.wav"
+        progress_path = self.config.paths.processing / f"{processing_file.stem}.progress.json"
         process_json_path = self.config.paths.output / f"{processing_file.stem}.process.json"
         job_options_path = job_options_path_for(processing_file)
         job_options: dict[str, Any] = {}
         silence_threshold_db = self.config.inference.silence_threshold_db
         min_silence_duration_s = self.config.inference.min_silence_duration_s
 
+        def update_progress(
+            stage: str,
+            message: str,
+            current: int | None = None,
+            total: int | None = None,
+            extra: dict[str, Any] | None = None,
+        ) -> None:
+            elapsed = round(time.perf_counter() - start_time, 3)
+            payload: dict[str, Any] = {
+                "status": "processing",
+                "source_file": processing_file.name,
+                "stage": stage,
+                "message": message,
+                "started_at": started,
+                "updated_at": now_iso(),
+                "elapsed_seconds": elapsed,
+                "job_id": job_id,
+            }
+            if current is not None:
+                payload["current"] = current
+            if total is not None:
+                payload["total"] = total
+            if current is not None and total:
+                payload["percent"] = round((current / total) * 100, 1)
+            if extra:
+                payload.update(extra)
+            write_json_atomic(progress_path, payload)
+
         LOGGER.info("Job %s started: %s attempt=%s", job_id, processing_file.name, attempt)
+        update_progress("starting", "Job started")
         if attempt > self.config.recovery.maximum_attempts:
             failure = {
                 "status": "failed",
@@ -102,11 +134,18 @@ class MediaProcessor:
                 job_options.get("min_silence_duration_s", self.config.inference.min_silence_duration_s)
             )
             cleanup_existing_parts(self.config.paths.output, processing_file.stem)
+            update_progress("probing", "Reading media duration")
             media_duration = probe_duration_seconds(processing_file)
             LOGGER.info("Audio extraction started: %s", processing_file.name)
+            update_progress(
+                "extracting_audio",
+                "Extracting audio",
+                extra={"media_duration_seconds": media_duration},
+            )
             extract_audio(processing_file, wav_path)
             auto_silence_threshold = None
             if bool(job_options.get("auto_silence_threshold", False)):
+                update_progress("auto_silence_threshold", "Analyzing audio levels")
                 auto_silence_threshold = estimate_silence_threshold(wav_path)
                 silence_threshold_db = auto_silence_threshold.threshold_db
                 LOGGER.info(
@@ -119,6 +158,11 @@ class MediaProcessor:
             silences = []
             if self.config.inference.silence_split or self.config.inference.vad_pre_split:
                 try:
+                    update_progress(
+                        "detecting_silence",
+                        "Detecting silence spans",
+                        extra={"silence_threshold_db": silence_threshold_db},
+                    )
                     silences = detect_silences(
                         wav_path,
                         silence_threshold_db,
@@ -127,12 +171,23 @@ class MediaProcessor:
                 except RuntimeError as exc:
                     LOGGER.warning("Silence detection skipped: %s", exc)
             silence_count = len(silences)
+            update_progress(
+                "transcribing",
+                "Transcribing audio",
+                extra={"detected_silence_count": silence_count},
+            )
             transcription, raw_chunks, segment_count, start_refinement = self._transcribe_audio(
                 wav_path,
                 media_duration,
                 silences,
                 job_id,
                 silence_threshold_db,
+                update_progress,
+            )
+            update_progress(
+                "postprocessing",
+                "Post-processing subtitles",
+                extra={"transcription_segment_count": segment_count},
             )
             chunks = normalize_chunks(raw_chunks)
             if transcription.word_timestamps_used:
@@ -227,7 +282,9 @@ class MediaProcessor:
                 "job_id": job_id,
             }
 
+            update_progress("writing_outputs", "Writing SRT and metadata")
             self._write_outputs(processing_file.stem, chunks, raw_payload, process_payload)
+            update_progress("finalizing", "Finalizing source disposition")
             destination_root = self.config.paths.archive
             if validation_status == "suspicious_incomplete":
                 destination_root = (
@@ -266,6 +323,10 @@ class MediaProcessor:
             except OSError:
                 LOGGER.warning("Could not remove temporary wav: %s", wav_path)
             try:
+                progress_path.unlink(missing_ok=True)
+            except OSError:
+                LOGGER.warning("Could not remove progress json: %s", progress_path)
+            try:
                 job_options_path.unlink(missing_ok=True)
             except OSError:
                 LOGGER.warning("Could not remove job options: %s", job_options_path)
@@ -277,6 +338,7 @@ class MediaProcessor:
         silences: list[Any],
         job_id: str,
         silence_threshold_db: str,
+        progress: ProgressCallback | None = None,
     ) -> tuple[Any, list[dict[str, Any]], int, dict[str, Any]]:
         no_refinement = {
             "enabled": self.config.inference.vad_refine_segment_start,
@@ -285,6 +347,8 @@ class MediaProcessor:
             "maximum_adjustment_s": 0.0,
         }
         if not self.config.inference.vad_pre_split or media_duration is None or not silences:
+            if progress:
+                progress("transcribing", "Transcribing full audio", None, None, None)
             transcription = self.transcriber.transcribe(str(wav_path))
             return transcription, extract_raw_chunks(transcription.raw), 1, no_refinement
 
@@ -297,12 +361,16 @@ class MediaProcessor:
             self.config.inference.vad_merge_gap_s,
         )
         if not spans:
+            if progress:
+                progress("transcribing", "Transcribing full audio", None, None, None)
             transcription = self.transcriber.transcribe(str(wav_path))
             return transcription, extract_raw_chunks(transcription.raw), 1, no_refinement
 
         offset_spans = spans
         start_refinement = no_refinement
         if self.config.inference.vad_refine_segment_start:
+            if progress:
+                progress("refining_segments", "Refining VAD segment starts", 0, len(spans), None)
             refinement = refine_speech_span_starts(
                 wav_path,
                 spans,
@@ -332,6 +400,14 @@ class MediaProcessor:
         all_chunks: list[dict[str, Any]] = []
         last_transcription = None
         for index, (span, offset_span) in enumerate(zip(spans, offset_spans), 1):
+            if progress:
+                progress(
+                    "transcribing_segments",
+                    "Transcribing VAD segment",
+                    index,
+                    len(spans),
+                    {"segment_start_seconds": round(span.start, 3), "segment_end_seconds": round(span.end, 3)},
+                )
             segment_path = self.config.paths.temp / f"{wav_path.stem}.{job_id}.{index:04d}.wav"
             try:
                 extract_audio_segment(wav_path, segment_path, span.start, span.end)

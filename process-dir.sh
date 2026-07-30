@@ -123,8 +123,10 @@ echo
 
 submitted_target_names=()
 submitted_base_names=()
+submitted_source_paths=()
 submitted_output_srts=()
 submitted_process_jsons=()
+submitted_progress_jsons=()
 submitted_failed_files=()
 
 for source_path in "${sources[@]}"; do
@@ -163,8 +165,10 @@ for source_path in "${sources[@]}"; do
   submitted_base_name="$(path_stem "$target_name")"
   submitted_target_names+=("$target_name")
   submitted_base_names+=("$submitted_base_name")
+  submitted_source_paths+=("$source_path")
   submitted_output_srts+=("$output_dir/$submitted_base_name.ja.srt")
   submitted_process_jsons+=("$output_dir/$submitted_base_name.process.json")
+  submitted_progress_jsons+=("$processing_dir/$submitted_base_name.progress.json")
   submitted_failed_files+=("$failed_dir/$target_name")
 done
 
@@ -196,12 +200,13 @@ while [[ "$SECONDS" -lt "$deadline" ]]; do
     fi
 
     if [[ -f "${submitted_process_jsons[$i]}" ]]; then
+      finish_progress_line
       echo
       echo "Completed: ${submitted_target_names[$i]}"
       if [[ -f "${submitted_output_srts[$i]}" ]]; then
         echo "  SRT: ${submitted_output_srts[$i]}"
         if [[ "$TRANSLATE" == "true" ]]; then
-          invoke_srt_translation "${submitted_output_srts[$i]}" "$translation_model"
+          invoke_srt_translation "${submitted_output_srts[$i]}" "$translation_model" "${submitted_source_paths[$i]}"
         fi
       fi
       completed[$i]="true"
@@ -209,6 +214,7 @@ while [[ "$SECONDS" -lt "$deadline" ]]; do
     fi
 
     if [[ -f "${submitted_failed_files[$i]}" ]]; then
+      finish_progress_line
       echo
       echo "Failed: ${submitted_target_names[$i]}"
       echo "  Source moved to: ${submitted_failed_files[$i]}"
@@ -222,13 +228,39 @@ while [[ "$SECONDS" -lt "$deadline" ]]; do
   done
 
   if [[ "$pending" -eq 0 ]]; then
+    finish_progress_line
     echo
     echo "All submitted files completed."
     exit 0
   fi
 
-  echo "Still waiting: $pending file(s)"
+  if [[ "$pending" -eq 1 ]]; then
+    for i in "${!submitted_target_names[@]}"; do
+      if [[ "${completed[$i]}" == "true" ]]; then
+        continue
+      fi
+      if summary="$(progress_summary "${submitted_progress_jsons[$i]}")"; then
+        print_progress_line "Still waiting: ${submitted_target_names[$i]} | $summary"
+      else
+        print_progress_line "Still waiting: ${submitted_target_names[$i]} | queued or waiting for worker"
+      fi
+    done
+  else
+    finish_progress_line
+    echo "Still waiting: $pending file(s)"
+    for i in "${!submitted_target_names[@]}"; do
+      if [[ "${completed[$i]}" == "true" ]]; then
+        continue
+      fi
+      if summary="$(progress_summary "${submitted_progress_jsons[$i]}")"; then
+        echo "  ${submitted_target_names[$i]}: $summary"
+      else
+        echo "  ${submitted_target_names[$i]}: queued or waiting for worker"
+      fi
+    done
+  fi
   sleep 10
 done
 
+finish_progress_line
 die "Timed out while waiting for completion."

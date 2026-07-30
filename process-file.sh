@@ -147,11 +147,13 @@ submitted_base_name="$(path_stem "$target_name")"
 deadline=$((SECONDS + TIMEOUT_MINUTES * 60))
 output_srt="$output_dir/$submitted_base_name.ja.srt"
 process_json="$output_dir/$submitted_base_name.process.json"
+progress_json="$processing_dir/$submitted_base_name.progress.json"
 failed_file="$failed_dir/$target_name"
 
 echo "Waiting for completion. Timeout: $TIMEOUT_MINUTES minutes"
 while [[ "$SECONDS" -lt "$deadline" ]]; do
   if [[ -f "$process_json" ]]; then
+    finish_progress_line
     echo
     echo "Completed:"
     cat "$process_json"
@@ -160,13 +162,14 @@ while [[ "$SECONDS" -lt "$deadline" ]]; do
       echo "SRT:"
       echo "  $output_srt"
       if [[ "$TRANSLATE" == "true" ]]; then
-        invoke_srt_translation "$output_srt" "$translation_model"
+        invoke_srt_translation "$output_srt" "$translation_model" "$MEDIA_PATH"
       fi
     fi
     exit 0
   fi
 
   if [[ -f "$failed_file" ]]; then
+    finish_progress_line
     echo
     echo "Failed. Source moved to:"
     echo "  $failed_file"
@@ -175,7 +178,13 @@ while [[ "$SECONDS" -lt "$deadline" ]]; do
     exit 1
   fi
 
+  if summary="$(progress_summary "$progress_json")"; then
+    print_progress_line "Still waiting: $target_name | $summary"
+  else
+    print_progress_line "Still waiting: $target_name | queued or waiting for worker"
+  fi
   sleep 10
 done
 
+finish_progress_line
 die "Timed out while waiting for completion: $target_name"

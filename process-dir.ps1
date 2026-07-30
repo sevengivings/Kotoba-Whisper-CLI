@@ -161,6 +161,103 @@ function Save-TranslationModel {
     [System.IO.File]::WriteAllText($path, $json, [System.Text.UTF8Encoding]::new($false))
 }
 
+function Get-TranslatedSrtPath {
+    param([Parameter(Mandatory = $true)][string]$InputSrt)
+    $outputSrt = $InputSrt -replace '\.ja\.srt$', '.ko.srt'
+    if ($outputSrt -eq $InputSrt) {
+        $outputSrt = [System.IO.Path]::ChangeExtension($InputSrt, ".ko.srt")
+    }
+    return $outputSrt
+}
+
+function Get-UniqueSubtitlePath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $Path
+    }
+    $directory = Split-Path -Parent $Path
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    $extension = [System.IO.Path]::GetExtension($Path)
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $candidate = Join-Path $directory "$baseName`_$timestamp$extension"
+    if (-not (Test-Path -LiteralPath $candidate)) {
+        return $candidate
+    }
+    $index = 2
+    while ($true) {
+        $candidate = Join-Path $directory "$baseName`_$timestamp`_$index$extension"
+        if (-not (Test-Path -LiteralPath $candidate)) {
+            return $candidate
+        }
+        $index += 1
+    }
+}
+
+function Copy-TranslatedSubtitleToSourceFolder {
+    param(
+        [Parameter(Mandatory = $true)][string]$TranslatedSrt,
+        [Parameter(Mandatory = $true)][string]$SourcePath
+    )
+    if (-not (Test-Path -LiteralPath $TranslatedSrt -PathType Leaf)) {
+        throw "Translated subtitle not found: $TranslatedSrt"
+    }
+    $sourceDir = Split-Path -Parent $SourcePath
+    $sourceName = Split-Path -Leaf $SourcePath
+    $sourceBaseName = [System.IO.Path]::GetFileNameWithoutExtension($sourceName)
+    $primaryPath = Join-Path $sourceDir "$sourceBaseName.srt"
+    if (Test-Path -LiteralPath $primaryPath) {
+        $targetPath = Join-Path $sourceDir "$sourceBaseName.ko.srt"
+        $targetPath = Get-UniqueSubtitlePath -Path $targetPath
+    } else {
+        $targetPath = $primaryPath
+    }
+    Copy-Item -LiteralPath $TranslatedSrt -Destination $targetPath
+    Write-Host "Translated subtitle copied to source folder:"
+    Write-Host "  $targetPath"
+}
+
+function Get-ProgressSummary {
+    param([Parameter(Mandatory = $true)][string]$ProgressPath)
+    if (-not (Test-Path -LiteralPath $ProgressPath -PathType Leaf)) {
+        return ""
+    }
+    try {
+        $progress = Get-Content -LiteralPath $ProgressPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        return ""
+    }
+    $message = [string]$progress.message
+    if ([string]::IsNullOrWhiteSpace($message)) {
+        $message = [string]$progress.stage
+    }
+    $parts = @($message)
+    if ($null -ne $progress.current -and $null -ne $progress.total) {
+        $parts += ("{0}/{1}" -f $progress.current, $progress.total)
+    }
+    if ($null -ne $progress.percent) {
+        $parts += ("{0}%" -f $progress.percent)
+    }
+    if ($null -ne $progress.elapsed_seconds) {
+        $elapsed = [TimeSpan]::FromSeconds([double]$progress.elapsed_seconds)
+        $parts += ("elapsed {0:hh\:mm\:ss}" -f $elapsed)
+    }
+    return ($parts -join " | ")
+}
+
+$ProgressLineWidth = 0
+function Write-ProgressLine {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    $script:ProgressLineWidth = [Math]::Max($script:ProgressLineWidth, $Message.Length)
+    [Console]::Write("`r" + $Message.PadRight($script:ProgressLineWidth))
+}
+
+function Complete-ProgressLine {
+    if ($script:ProgressLineWidth -gt 0) {
+        [Console]::Write("`r" + (" " * $script:ProgressLineWidth) + "`r")
+        $script:ProgressLineWidth = 0
+    }
+}
+
 function Get-OllamaBaseUri {
     return "http://$OllamaHost`:$OllamaPort"
 }
@@ -229,10 +326,7 @@ function Invoke-SrtTranslation {
         [Parameter(Mandatory = $true)][string]$InputSrt,
         [Parameter(Mandatory = $true)][string]$Model
     )
-    $outputSrt = $InputSrt -replace '\.ja\.srt$', '.ko.srt'
-    if ($outputSrt -eq $InputSrt) {
-        $outputSrt = [System.IO.Path]::ChangeExtension($InputSrt, ".ko.srt")
-    }
+    $outputSrt = Get-TranslatedSrtPath -InputSrt $InputSrt
     $args = @(
         (Join-Path $PSScriptRoot "tools\translate-srt-ollama.py"),
         $InputSrt,
@@ -461,8 +555,10 @@ foreach ($source in $sources) {
     $submitted += [pscustomobject]@{
         TargetName = $targetName
         BaseName = [System.IO.Path]::GetFileNameWithoutExtension($targetName)
+        SourcePath = $source.FullName
         OutputSrt = Join-Path $PSScriptRoot "output\$([System.IO.Path]::GetFileNameWithoutExtension($targetName)).ja.srt"
         ProcessJson = Join-Path $PSScriptRoot "output\$([System.IO.Path]::GetFileNameWithoutExtension($targetName)).process.json"
+        ProgressJson = Join-Path $PSScriptRoot "processing\$([System.IO.Path]::GetFileNameWithoutExtension($targetName)).progress.json"
         FailedFile = Join-Path $PSScriptRoot "failed\$targetName"
     }
 }
@@ -491,12 +587,15 @@ while ((Get-Date) -lt $deadline) {
     foreach ($key in @($pending.Keys)) {
         $item = $pending[$key]
         if (Test-Path -LiteralPath $item.ProcessJson) {
+            Complete-ProgressLine
             Write-Host ""
             Write-Host "Completed: $($item.TargetName)"
             if (Test-Path -LiteralPath $item.OutputSrt) {
                 Write-Host "  SRT: $($item.OutputSrt)"
                 if ($Translate) {
+                    $translatedSrt = Get-TranslatedSrtPath -InputSrt $item.OutputSrt
                     Invoke-SrtTranslation -InputSrt $item.OutputSrt -Model $translationModel
+                    Copy-TranslatedSubtitleToSourceFolder -TranslatedSrt $translatedSrt -SourcePath $item.SourcePath
                 }
             }
             $pending.Remove($key)
@@ -504,6 +603,7 @@ while ((Get-Date) -lt $deadline) {
         }
 
         if (Test-Path -LiteralPath $item.FailedFile) {
+            Complete-ProgressLine
             Write-Host ""
             Write-Host "Failed: $($item.TargetName)"
             Write-Host "  Source moved to: $($item.FailedFile)"
@@ -517,13 +617,34 @@ while ((Get-Date) -lt $deadline) {
     }
 
     if ($pending.Count -eq 0) {
+        Complete-ProgressLine
         Write-Host ""
         Write-Host "All submitted files completed."
         exit 0
     }
 
-    Write-Host "Still waiting: $($pending.Count) file(s)"
+    if ($pending.Count -eq 1) {
+        $item = @($pending.Values)[0]
+        $progressSummary = Get-ProgressSummary -ProgressPath $item.ProgressJson
+        if ($progressSummary) {
+            Write-ProgressLine -Message "Still waiting: $($item.TargetName) | $progressSummary"
+        } else {
+            Write-ProgressLine -Message "Still waiting: $($item.TargetName) | queued or waiting for worker"
+        }
+    } else {
+        Complete-ProgressLine
+        Write-Host "Still waiting: $($pending.Count) file(s)"
+        foreach ($item in $pending.Values) {
+            $progressSummary = Get-ProgressSummary -ProgressPath $item.ProgressJson
+            if ($progressSummary) {
+                Write-Host "  $($item.TargetName): $progressSummary"
+            } else {
+                Write-Host "  $($item.TargetName): queued or waiting for worker"
+            }
+        }
+    }
     Start-Sleep -Seconds 10
 }
 
+Complete-ProgressLine
 throw "Timed out while waiting for completion. Pending files: $($pending.Keys -join ', ')"

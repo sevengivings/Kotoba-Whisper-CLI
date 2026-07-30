@@ -225,18 +225,127 @@ resolve_translation_model() {
   die "No translation model configured. Use --translation-model <model> or --translate-model-choice."
 }
 
+translated_srt_path() {
+  local input_srt="$1"
+  if [[ "$input_srt" == *.ja.srt ]]; then
+    echo "${input_srt%.ja.srt}.ko.srt"
+  else
+    echo "${input_srt%.*}.ko.srt"
+  fi
+}
+
+unique_subtitle_path() {
+  local path="$1"
+  if [[ ! -e "$path" ]]; then
+    echo "$path"
+    return
+  fi
+
+  local dir base ext timestamp candidate index
+  dir="$(dirname "$path")"
+  base="$(basename "$path")"
+  ext=""
+  if [[ "$base" == *.* ]]; then
+    ext=".${base##*.}"
+    base="${base%.*}"
+  fi
+  timestamp="$(date +%Y%m%d_%H%M%S)"
+  candidate="$dir/${base}_${timestamp}${ext}"
+  if [[ ! -e "$candidate" ]]; then
+    echo "$candidate"
+    return
+  fi
+
+  index=2
+  while true; do
+    candidate="$dir/${base}_${timestamp}_${index}${ext}"
+    if [[ ! -e "$candidate" ]]; then
+      echo "$candidate"
+      return
+    fi
+    index=$((index + 1))
+  done
+}
+
+copy_translated_subtitle_to_source_folder() {
+  local translated_srt="$1"
+  local source_path="$2"
+  [[ -f "$translated_srt" ]] || die "Translated subtitle not found: $translated_srt"
+
+  local source_dir source_name source_base primary_path target_path
+  source_dir="$(dirname "$source_path")"
+  source_name="$(basename "$source_path")"
+  source_base="${source_name%.*}"
+  primary_path="$source_dir/$source_base.srt"
+  if [[ -e "$primary_path" ]]; then
+    target_path="$(unique_subtitle_path "$source_dir/$source_base.ko.srt")"
+  else
+    target_path="$primary_path"
+  fi
+
+  cp "$translated_srt" "$target_path"
+  echo "Translated subtitle copied to source folder:"
+  echo "  $target_path"
+}
+
+progress_summary() {
+  local progress_path="$1"
+  [[ -f "$progress_path" ]] || return 1
+  local py
+  py="$(python_cmd)" || return 1
+  "$py" - "$progress_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    progress = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+
+message = str(progress.get("message") or progress.get("stage") or "").strip()
+parts = [message] if message else []
+if progress.get("current") is not None and progress.get("total") is not None:
+    parts.append(f"{progress['current']}/{progress['total']}")
+if progress.get("percent") is not None:
+    parts.append(f"{progress['percent']}%")
+if progress.get("elapsed_seconds") is not None:
+    elapsed = int(float(progress["elapsed_seconds"]))
+    parts.append(f"elapsed {elapsed // 3600:02d}:{(elapsed % 3600) // 60:02d}:{elapsed % 60:02d}")
+if not parts:
+    sys.exit(1)
+print(" | ".join(parts))
+PY
+}
+
+PROGRESS_LINE_WIDTH=0
+
+print_progress_line() {
+  local message="$1"
+  local width=${#message}
+  if (( width > PROGRESS_LINE_WIDTH )); then
+    PROGRESS_LINE_WIDTH=$width
+  fi
+  printf '\r%-*s' "$PROGRESS_LINE_WIDTH" "$message"
+}
+
+finish_progress_line() {
+  if (( PROGRESS_LINE_WIDTH > 0 )); then
+    printf '\r%-*s\r' "$PROGRESS_LINE_WIDTH" ""
+    PROGRESS_LINE_WIDTH=0
+  fi
+}
+
 invoke_srt_translation() {
   local input_srt="$1"
   local model="$2"
+  local source_path="${3:-}"
   local py
   py="$(python_cmd)" || die "Python was not found. Install python3."
 
   local output_srt
-  if [[ "$input_srt" == *.ja.srt ]]; then
-    output_srt="${input_srt%.ja.srt}.ko.srt"
-  else
-    output_srt="${input_srt%.*}.ko.srt"
-  fi
+  output_srt="$(translated_srt_path "$input_srt")"
 
   echo
   echo "Translating SRT:"
@@ -266,6 +375,9 @@ invoke_srt_translation() {
   save_translation_model "$model"
   echo "Translation completed:"
   echo "  $output_srt"
+  if [[ -n "$source_path" ]]; then
+    copy_translated_subtitle_to_source_folder "$output_srt" "$source_path"
+  fi
 }
 
 validate_common_options() {

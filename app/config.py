@@ -178,7 +178,7 @@ def load_config(config_path: Path) -> AppConfig:
                 word_timestamps=bool(_require(inference, "word_timestamps")),
                 punctuation=bool(inference.get("punctuation", True)),
                 silence_split=bool(inference.get("silence_split", True)),
-                silence_threshold_db=str(inference.get("silence_threshold_db", "-35dB")),
+                silence_threshold_db=str(inference.get("silence_threshold_db", "-42dB")),
                 min_silence_duration_s=float(inference.get("min_silence_duration_s", 0.7)),
                 min_subtitle_duration_s=float(inference.get("min_subtitle_duration_s", 0.8)),
                 word_max_gap_s=float(inference.get("word_max_gap_s", 0.5)),
