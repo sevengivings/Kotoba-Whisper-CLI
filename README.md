@@ -1,6 +1,6 @@
 # Kotoba-Whisper CLI
 
-Windows + Docker 환경에서 `input` 폴더에 넣은 영상/음성 파일을 `kotoba-tech/kotoba-whisper-v2.2`로 일본어 전사하고 SRT/TXT/JSON 결과를 생성하는 폴더 감시형 CLI입니다.
+Windows 또는 Linux + Docker 환경에서 `input` 폴더에 넣은 영상/음성 파일을 `kotoba-tech/kotoba-whisper-v2.2`로 일본어 전사하고 SRT/TXT/JSON 결과를 생성하는 폴더 감시형 CLI입니다.
 
 ## 주요 기능
 
@@ -22,10 +22,10 @@ Windows + Docker 환경에서 `input` 폴더에 넣은 영상/음성 파일을 `
 
 ## 실행 환경
 
-- Windows 11
-- Docker Desktop + WSL2
+- Windows 11 + Docker Desktop + WSL2 또는 Ubuntu + Docker Engine
 - NVIDIA GPU 및 최신 NVIDIA 드라이버
-- 권장 위치: `C:\Python\Kotoba-Whisper-CLI`
+- Windows 권장 위치: `C:\Python\Kotoba-Whisper-CLI`
+- Ubuntu 예시 위치: `~/Kotoba-Whisper-CLI`
 
 고정 버전:
 
@@ -45,6 +45,14 @@ docker compose up -d
 
 ```powershell
 .\start.ps1
+```
+
+Ubuntu에서는:
+
+```bash
+cd ~/Kotoba-Whisper-CLI
+chmod +x process-common.sh process-file.sh process-dir.sh
+docker compose up -d
 ```
 
 상태 확인:
@@ -72,10 +80,18 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-file.ps1 "Y:\Best\sample.mp4"
 ```
 
+```bash
+./process-file.sh "/mnt/best/sample.mp4"
+```
+
 제출만 하고 바로 돌아오려면:
 
 ```powershell
 .\process-file.ps1 "Y:\Best\sample.mp4" -NoWait
+```
+
+```bash
+./process-file.sh "/mnt/best/sample.mp4" --no-wait
 ```
 
 특정 파일만 무음 감지 기준을 바꾸려면:
@@ -84,10 +100,18 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-file.ps1 "Y:\Best\sample.mp4" -SilenceThresholdDb -35dB
 ```
 
+```bash
+./process-file.sh "/mnt/best/sample.mp4" --silence-threshold-db -35dB
+```
+
 파일의 전체 음량 분포를 보고 무음 감지 기준을 자동으로 잡으려면:
 
 ```powershell
 .\process-file.ps1 "Y:\Best\sample.mp4" -AutoSilenceThreshold
+```
+
+```bash
+./process-file.sh "/mnt/best/sample.mp4" --auto-silence-threshold
 ```
 
 전사 완료 후 Ollama로 한국어 자막까지 번역하려면:
@@ -96,10 +120,18 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-file.ps1 "Y:\Best\sample.mp4" -Translate
 ```
 
+```bash
+./process-file.sh "/mnt/best/sample.mp4" --translate
+```
+
 처음 사용할 모델을 목록에서 고르려면:
 
 ```powershell
 .\process-file.ps1 "Y:\Best\sample.mp4" -Translate -TranslateModelChoice
+```
+
+```bash
+./process-file.sh "/mnt/best/sample.mp4" --translate --translate-model-choice
 ```
 
 디렉터리 안의 지원 미디어 파일을 한꺼번에 처리 큐에 넣으려면:
@@ -108,10 +140,18 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-dir.ps1 "Y:\Best"
 ```
 
+```bash
+./process-dir.sh "/mnt/best"
+```
+
 하위 폴더까지 포함하려면:
 
 ```powershell
 .\process-dir.ps1 "Y:\Best" -Recurse
+```
+
+```bash
+./process-dir.sh "/mnt/best" --recurse
 ```
 
 모든 제출 파일의 완료까지 기다리려면:
@@ -126,10 +166,18 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-dir.ps1 "Y:\Best" -NoWait
 ```
 
+```bash
+./process-dir.sh "/mnt/best" --no-wait
+```
+
 디렉터리 안의 파일 전체에 같은 무음 감지 기준을 적용하려면:
 
 ```powershell
 .\process-dir.ps1 "Y:\Best" -SilenceThresholdDb -35dB
+```
+
+```bash
+./process-dir.sh "/mnt/best" --silence-threshold-db -35dB
 ```
 
 디렉터리 안의 각 파일마다 무음 감지 기준을 자동으로 잡으려면:
@@ -138,19 +186,27 @@ docker logs --tail 50 kotoba-folder-watcher
 .\process-dir.ps1 "Y:\Best" -AutoSilenceThreshold
 ```
 
+```bash
+./process-dir.sh "/mnt/best" --auto-silence-threshold
+```
+
 디렉터리 전체를 전사 후 번역하려면:
 
 ```powershell
 .\process-dir.ps1 "Y:\Best" -Translate
 ```
 
-`process-file.ps1`과 `process-dir.ps1`은 기본적으로 완료까지 기다립니다. `-NoWait`를 붙이면 파일을 `input` 폴더에 제출한 뒤 바로 종료합니다. Docker 컨테이너가 떠 있지 않으면 제출 전에 `start.ps1`로 먼저 시작합니다. Docker Desktop 데몬이 응답하지 않는 경우에는 Docker Desktop 실행을 시도하고, 그래도 준비되지 않으면 명확한 오류를 보여줍니다. `-SilenceThresholdDb`를 붙이면 해당 제출 파일에만 `config.yaml`의 `silence_threshold_db`를 override합니다. `-AutoSilenceThreshold`를 붙이면 컨테이너 안에서 추출된 WAV의 frame RMS 분포를 분석해 파일별 `silence_threshold_db`를 자동으로 선택합니다. 두 옵션은 동시에 쓸 수 없습니다. 필요하면 `-MinSilenceDurationSeconds 0.4`처럼 최소 무음 길이도 함께 override할 수 있습니다. `process-dir.ps1`은 기본적으로 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 등 지원 확장자만 복사합니다. 파일은 `.part`로 먼저 복사한 뒤 이름을 바꾸므로, watcher가 복사 중인 파일을 먼저 처리하지 않습니다.
+```bash
+./process-dir.sh "/mnt/best" --translate
+```
+
+`process-file.ps1`/`process-dir.ps1`과 `process-file.sh`/`process-dir.sh`는 기본적으로 완료까지 기다립니다. `-NoWait` 또는 `--no-wait`를 붙이면 파일을 `input` 폴더에 제출한 뒤 바로 종료합니다. Docker 컨테이너가 떠 있지 않으면 제출 전에 `docker compose up -d --build`로 먼저 시작합니다. Docker 데몬이 응답하지 않는 경우에는 명확한 오류를 보여줍니다. `-SilenceThresholdDb` 또는 `--silence-threshold-db`를 붙이면 해당 제출 파일에만 `config.yaml`의 `silence_threshold_db`를 override합니다. `-AutoSilenceThreshold` 또는 `--auto-silence-threshold`를 붙이면 컨테이너 안에서 추출된 WAV의 frame RMS 분포를 분석해 파일별 `silence_threshold_db`를 자동으로 선택합니다. 두 옵션은 동시에 쓸 수 없습니다. 필요하면 `-MinSilenceDurationSeconds 0.4` 또는 `--min-silence-duration-seconds 0.4`처럼 최소 무음 길이도 함께 override할 수 있습니다. `process-dir` 스크립트는 기본적으로 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 등 지원 확장자만 복사합니다. 파일은 `.part`로 먼저 복사한 뒤 이름을 바꾸므로, watcher가 복사 중인 파일을 먼저 처리하지 않습니다.
 
 `-Translate`는 완료를 기다린 뒤 `output\<name>.ja.srt`를 `output\<name>.ko.srt`로 번역합니다. 번역 전에는 `http://localhost:11434/api/tags`로 Ollama 서버와 모델 목록을 확인합니다. `-TranslateModelChoice`를 붙이면 Ollama 서버에 등록된 모델을 번호로 보여줍니다. 번역이 성공하면 사용한 모델을 `config/translation-defaults.json`에 저장하고, 다음부터는 `-Translate`만 붙여도 저장된 모델을 재사용합니다. 모델을 직접 지정하려면 `-TranslationModel "gemma3:4b"`처럼 넘기면 됩니다. 다른 PC나 컨테이너의 Ollama를 쓰려면 `-OllamaHost`와 `-OllamaPort`를 지정하세요.
 
-번역은 기본적으로 자막 50개씩 묶어 처리합니다. 묶음 단위로 진행 상황이 표시되며, 더 크거나 작게 나누려면 `-BatchSize 100` 또는 `--batch-size 100`처럼 지정하세요. 한 줄씩 번역하려면 `process-file.ps1`/`process-dir.ps1`에서는 `-NoBatchTranslate`, 직접 실행 시에는 `tools\translate-srt-ollama.py --no-batch-translate`를 사용합니다. `--batch-translate`와 `-BatchTranslate`는 기존 명령 호환용으로 남아 있습니다. `--text-split-size`는 긴 프롬프트를 더 잘게 자르고 싶을 때만 추가로 쓰는 글자 수 제한입니다.
+번역은 기본적으로 자막 50개씩 묶어 처리합니다. 묶음 단위로 진행 상황이 표시되며, 더 크거나 작게 나누려면 `-BatchSize 100` 또는 `--batch-size 100`처럼 지정하세요. 한 줄씩 번역하려면 PowerShell에서는 `-NoBatchTranslate`, bash/직접 실행에서는 `--no-batch-translate`를 사용합니다. `--batch-translate`와 `-BatchTranslate`는 기존 명령 호환용으로 남아 있습니다. `--text-split-size`는 긴 프롬프트를 더 잘게 자르고 싶을 때만 추가로 쓰는 글자 수 제한입니다.
 
-한국어 번역은 기본적으로 반말을 피하고 존댓말 자막체를 사용하도록 프롬프트를 강제합니다. 편한 말투가 필요하면 `process-file.ps1`/`process-dir.ps1`에서는 `-KoreanStyle banmal`, 직접 실행 시에는 `tools\translate-srt-ollama.py --korean-style banmal`을 사용하세요. 일본어 원문이 존대 표현이어도 한국어 출력을 비존대 informal 스타일로 강하게 고정하려면 `-KoreanStyle strict-banmal` 또는 `--korean-style strict-banmal`을 사용합니다.
+한국어 번역은 기본적으로 반말을 피하고 존댓말 자막체를 사용하도록 프롬프트를 강제합니다. 편한 말투가 필요하면 PowerShell에서는 `-KoreanStyle banmal`, bash/직접 실행에서는 `--korean-style banmal`을 사용하세요. 일본어 원문이 존대 표현이어도 한국어 출력을 비존대 informal 스타일로 강하게 고정하려면 `-KoreanStyle strict-banmal` 또는 `--korean-style strict-banmal`을 사용합니다.
 
 스크립트로 제출한 파일은 원본을 복사한 staged copy이므로, 성공 후 기본적으로 삭제됩니다. 예전처럼 처리된 복사본을 `archive`에 남기려면 `-KeepStagedCopy`를 붙이세요.
 
