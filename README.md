@@ -27,6 +27,52 @@ Windows 또는 Linux + Docker 환경에서 `input` 폴더에 넣은 영상/음�
 - Windows 권장 위치: `C:\Python\Kotoba-Whisper-CLI`
 - Ubuntu 예시 위치: `~/Kotoba-Whisper-CLI`
 
+## 초기 설치 도움말
+
+새 컴퓨터에서는 아래 항목을 먼저 준비하세요.
+
+1. **NVIDIA 드라이버**
+   - Windows에서는 GeForce Game Ready Driver 또는 Studio Driver를 최신 버전으로 설치합니다.
+   - 설치 후 PowerShell에서 `nvidia-smi`가 GPU를 보여주면 기본 준비가 된 것입니다.
+
+2. **WSL2**
+   - Windows PowerShell 관리자 권한에서 `wsl --install`을 실행한 뒤 재부팅합니다.
+   - Docker Desktop은 WSL2 backend 사용을 권장합니다.
+
+3. **Docker**
+   - Windows는 Docker Desktop을 설치하고, Settings에서 WSL2 backend와 GPU 사용이 가능한 상태인지 확인합니다.
+   - Docker Desktop 다운로드 설치가 잘 되지 않으면 PowerShell 관리자 권한에서 `winget`으로 설치할 수 있습니다.
+   - `winget install -e --id Docker.DockerDesktop`
+   - Ubuntu는 Docker Engine과 NVIDIA Container Toolkit이 필요합니다.
+   - 확인 명령:
+
+```powershell
+docker run --rm --gpus all nvidia/cuda:12.1.1-base-ubuntu22.04 nvidia-smi
+```
+
+4. **Python**
+   - PowerShell/bash 래퍼와 번역 도구 실행용입니다.
+   - Windows에서는 Python 3.11 이상을 설치하고 `python --version`으로 확인합니다.
+   - 컨테이너 내부 전사 환경은 Docker 이미지가 관리하므로, 호스트 Python에 PyTorch/CUDA를 직접 설치할 필요는 없습니다.
+
+5. **Ollama**
+   - 공식 다운로드: https://ollama.com/download
+   - `-Translate`로 한국어 번역까지 하려면 Ollama를 설치하고 실행해 둡니다.
+   - 사용할 번역 모델을 먼저 내려받습니다.
+
+```powershell
+ollama pull hf.co/mradermacher/Hy-MT2-30B-A3B-GGUF:Q4_K_M
+ollama list
+```
+
+처음 설치 후에는 아래 순서로 확인하는 것이 좋습니다.
+
+```powershell
+docker compose up -d --build
+.\status.ps1
+.\process-file.ps1 "D:\sample.mp4" -AutoSilenceThreshold
+```
+
 고정 버전:
 
 - CUDA 이미지: `nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04`
