@@ -35,6 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
     process.add_argument("--auto-silence-threshold", action="store_true")
     process.add_argument("--no-vad-pre-split", dest="vad_pre_split", action="store_false")
     process.set_defaults(vad_pre_split=True)
+    process.add_argument("--vad-engine", choices=("ffmpeg", "pyannote"), default="pyannote")
+    process.add_argument("--pyannote-model", default="pyannote/segmentation-3.0")
     process.add_argument("--vad-max-segment-duration-s", type=float, default=30.0)
     process.add_argument("--vad-min-speech-duration-s", type=float, default=0.25)
     process.add_argument("--vad-padding-s", type=float, default=0.4)
@@ -44,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     process.add_argument("--model-name", default="kotoba-tech/kotoba-whisper-v2.2")
     process.add_argument("--model-device", default="cuda:0")
     process.add_argument("--model-dtype", default="float16")
+    process.add_argument("--report-subtitle-quality", action="store_true")
+    process.add_argument("--drop-likely-hallucinations", action="store_true")
+    process.add_argument("--split-long-subtitles", action="store_true")
+    process.add_argument("--annotate-subtitle-quality", action="store_true")
+    process.add_argument("--tail-retranscribe-long-subtitles", action="store_true")
+    process.add_argument("--tail-retranscribe-max-candidates", type=int, default=20)
     process.add_argument("--translate", action="store_true")
     process.add_argument("--translation-model")
     process.add_argument("--translation-model-choice", action="store_true")
@@ -92,6 +100,8 @@ def run_process(args: argparse.Namespace) -> int:
         min_silence_duration_s=args.min_silence_duration_s,
         auto_silence_threshold=args.auto_silence_threshold,
         vad_pre_split=args.vad_pre_split,
+        vad_engine=args.vad_engine,
+        pyannote_model=args.pyannote_model,
         vad_max_segment_duration_s=args.vad_max_segment_duration_s,
         vad_min_speech_duration_s=args.vad_min_speech_duration_s,
         vad_padding_s=args.vad_padding_s,
@@ -101,6 +111,12 @@ def run_process(args: argparse.Namespace) -> int:
         model_name=args.model_name,
         model_device=args.model_device,
         model_dtype=args.model_dtype,
+        report_subtitle_quality=args.report_subtitle_quality,
+        drop_likely_hallucinations=args.drop_likely_hallucinations,
+        split_long_subtitles=args.split_long_subtitles,
+        annotate_subtitle_quality=args.annotate_subtitle_quality,
+        tail_retranscribe_long_subtitles=args.tail_retranscribe_long_subtitles,
+        tail_retranscribe_max_candidates=args.tail_retranscribe_max_candidates,
         translate=args.translate,
         translation_model=translation_model,
         ollama_host=args.ollama_host,
@@ -120,7 +136,7 @@ def run_process(args: argparse.Namespace) -> int:
             try:
                 with tqdm_progress() as progress:
                     result = process_video(media_file, options, progress=progress)
-                if result.status == "failed":
+                if result.status != "success":
                     failed += 1
                 print_process_result(result)
             except (OllamaModelError, OllamaUnavailableError, Exception) as exc:
@@ -141,7 +157,7 @@ def run_process(args: argparse.Namespace) -> int:
     print_process_result(result)
     if options.translate and result.ko_srt_path is not None:
         save_translation_model(options.translation_model)
-    return 0 if result.status != "failed" else 1
+    return 0 if result.status == "success" else 1
 
 
 def run_translate(args: argparse.Namespace) -> int:

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import math
 import re
+import statistics
+import wave
+from array import array
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -10,6 +15,18 @@ class SubtitleChunk:
     start: float
     end: float
     text: str
+
+
+@dataclass(frozen=True)
+class SubtitleQualityIssue:
+    index: int
+    start: float
+    end: float
+    duration: float
+    text: str
+    flags: list[str]
+    recommended_action: str
+    audio: dict[str, float | int] | None = None
 
 
 def format_srt_time(seconds: float) -> str:
@@ -30,6 +47,13 @@ def clean_text(text: str) -> str:
     text = re.sub(r"([\u300c\u300e\uff08])\s+", r"\1", text)
     text = re.sub(r"\s+([\u300d\u300f\uff09])", r"\1", text)
     return text
+
+
+def normalize_phrase(text: str) -> str:
+    normalized = clean_text(text)
+    normalized = re.sub(r"[\s\u3000]+", "", normalized)
+    normalized = re.sub(r"[\u3002\u3001\uff0c\uff0e,.!?\uff01\uff1f\u2026]+$", "", normalized)
+    return normalized
 
 
 def normalize_chunks(raw_chunks: list[dict[str, Any]]) -> list[SubtitleChunk]:
@@ -58,6 +82,264 @@ def normalize_chunks(raw_chunks: list[dict[str, Any]]) -> list[SubtitleChunk]:
         previous_end = end
         previous_text = text
     return chunks
+
+
+def filter_likely_hallucinations(chunks: list[SubtitleChunk]) -> tuple[list[SubtitleChunk], list[SubtitleQualityIssue]]:
+    kept: list[SubtitleChunk] = []
+    dropped: list[SubtitleQualityIssue] = []
+    for index, chunk in enumerate(chunks, 1):
+        flags = hallucination_flags(chunk)
+        should_drop = bool(
+            "blocked_phrase" in flags
+            or "punctuation_only" in flags
+            or ("near_zero_duration" in flags and len(normalize_phrase(chunk.text)) >= 5)
+        )
+        if should_drop:
+            dropped.append(
+                SubtitleQualityIssue(
+                    index=index,
+                    start=chunk.start,
+                    end=chunk.end,
+                    duration=chunk.end - chunk.start,
+                    text=chunk.text,
+                    flags=flags,
+                    recommended_action="drop",
+                )
+            )
+        else:
+            kept.append(chunk)
+    return kept, dropped
+
+
+def split_long_subtitle_candidates(
+    chunks: list[SubtitleChunk],
+    issues: list[SubtitleQualityIssue],
+    target_duration_s: float = 8.0,
+    max_chars: int = 28,
+) -> tuple[list[SubtitleChunk], list[SubtitleQualityIssue]]:
+    split_indexes = {issue.index for issue in issues if issue.recommended_action == "split_candidate"}
+    if not split_indexes:
+        return chunks, []
+    result: list[SubtitleChunk] = []
+    applied: list[SubtitleQualityIssue] = []
+    for index, chunk in enumerate(chunks, 1):
+        if index not in split_indexes:
+            result.append(chunk)
+            continue
+        parts = split_long_subtitle_text(chunk.text, max_parts=max(2, math.ceil((chunk.end - chunk.start) / target_duration_s)), max_chars=max_chars)
+        if len(parts) <= 1:
+            result.append(chunk)
+            continue
+        split_chunks = _distribute_subtitle_time(chunk, parts)
+        result.extend(split_chunks)
+        applied.append(
+            SubtitleQualityIssue(
+                index=index,
+                start=chunk.start,
+                end=chunk.end,
+                duration=chunk.end - chunk.start,
+                text=chunk.text,
+                flags=["split_applied"],
+                recommended_action="split_applied",
+                audio={"part_count": len(split_chunks)},
+            )
+        )
+    return result, applied
+
+
+def tail_retranscribe_candidate_indexes(issues: list[SubtitleQualityIssue]) -> set[int]:
+    return {
+        issue.index
+        for issue in issues
+        if 10.0 <= issue.duration <= 30.0
+        and issue.recommended_action in {"drop_candidate", "resegment_candidate"}
+        and "blocked_phrase" not in issue.flags
+        and "near_zero_duration" not in issue.flags
+    }
+
+
+def apply_tail_refinements(
+    chunks: list[SubtitleChunk],
+    refinements: dict[int, dict[str, Any]],
+) -> tuple[list[SubtitleChunk], list[SubtitleQualityIssue]]:
+    if not refinements:
+        return chunks, []
+    result: list[SubtitleChunk] = []
+    applied: list[SubtitleQualityIssue] = []
+    for index, chunk in enumerate(chunks, 1):
+        refinement = refinements.get(index)
+        if refinement is None:
+            result.append(chunk)
+            continue
+        new_start = float(refinement["new_start"])
+        if new_start <= chunk.start or new_start >= chunk.end:
+            result.append(chunk)
+            continue
+        adjusted = SubtitleChunk(new_start, chunk.end, chunk.text)
+        result.append(adjusted)
+        applied.append(
+            SubtitleQualityIssue(
+                index=index,
+                start=chunk.start,
+                end=chunk.end,
+                duration=chunk.end - chunk.start,
+                text=chunk.text,
+                flags=["tail_refine_applied"],
+                recommended_action="tail_refine_applied",
+                audio={
+                    "new_start": round(new_start, 3),
+                    "tail_start": round(float(refinement["tail_start"]), 3),
+                    "similarity": round(float(refinement["similarity"]), 3),
+                },
+            )
+        )
+    return result, applied
+
+
+def text_similarity(left: str, right: str) -> float:
+    left_norm = normalize_phrase(left)
+    right_norm = normalize_phrase(right)
+    if not left_norm or not right_norm:
+        return 0.0
+    if left_norm in right_norm or right_norm in left_norm:
+        return 1.0
+    left_grams = _char_ngrams(left_norm, 2)
+    right_grams = _char_ngrams(right_norm, 2)
+    if not left_grams or not right_grams:
+        return 1.0 if left_norm == right_norm else 0.0
+    intersection = len(left_grams & right_grams)
+    union = len(left_grams | right_grams)
+    return intersection / union if union else 0.0
+
+
+def split_long_subtitle_text(text: str, max_parts: int, max_chars: int = 28) -> list[str]:
+    text = clean_text(text)
+    if max_parts <= 1 or len(normalize_phrase(text)) <= max_chars:
+        return [text]
+    units = _split_text_units(text)
+    if len(units) <= 1:
+        return _split_text_by_character_count(text, max_parts)
+    return _merge_units_for_balanced_parts(units, max_parts=max_parts, max_chars=max_chars)
+
+
+def annotate_chunks_with_quality(chunks: list[SubtitleChunk], issues: list[SubtitleQualityIssue]) -> list[SubtitleChunk]:
+    issue_map = {issue.index: issue for issue in issues}
+    annotated: list[SubtitleChunk] = []
+    for index, chunk in enumerate(chunks, 1):
+        issue = issue_map.get(index)
+        if issue is None:
+            annotated.append(chunk)
+            continue
+        tag = f"[quality: {issue.recommended_action}; {', '.join(issue.flags)}]"
+        annotated.append(SubtitleChunk(chunk.start, chunk.end, f"{chunk.text}\n{tag}"))
+    return annotated
+
+
+def hallucination_flags(chunk: SubtitleChunk) -> list[str]:
+    flags: list[str] = []
+    duration = chunk.end - chunk.start
+    normalized = normalize_phrase(chunk.text)
+    if duration < 0.3:
+        flags.append("near_zero_duration")
+    if _is_punctuation_only(chunk.text):
+        flags.append("punctuation_only")
+    if normalized in _BLOCKED_STANDALONE_PHRASES:
+        flags.append("blocked_phrase")
+    if duration >= 8.0 and len(normalized) <= 30:
+        flags.append("long_duration_short_text")
+    if _looks_like_garbage_cjk(normalized):
+        flags.append("possible_garbage_cjk")
+    return flags
+
+
+def analyze_subtitle_quality(chunks: list[SubtitleChunk], wav_path: Path | None = None) -> list[SubtitleQualityIssue]:
+    audio_stats = audio_stats_for_chunks(wav_path, chunks) if wav_path is not None and wav_path.exists() else [None] * len(chunks)
+    issues: list[SubtitleQualityIssue] = []
+    for index, (chunk, audio) in enumerate(zip(chunks, audio_stats, strict=False), 1):
+        flags = hallucination_flags(chunk)
+        duration = chunk.end - chunk.start
+        normalized = normalize_phrase(chunk.text)
+        chars_per_second = len(normalized) / duration if duration > 0 else float("inf")
+        if duration >= 12.0 and len(normalized) >= 25:
+            flags.append("long_subtitle_split_candidate")
+        if duration >= 8.0 and chars_per_second < 2.0:
+            flags.append("low_chars_per_second")
+        if audio is not None:
+            if duration <= 3.0 and audio["max_db"] < -45.0:
+                flags.append("flat_audio")
+            if duration >= 8.0 and audio["max_db"] < -22.0 and audio["p90_db"] < -30.0:
+                flags.append("weak_audio_peak")
+            if duration >= 8.0 and audio["max_db"] >= -22.0 and audio["p90_db"] >= -30.0:
+                flags.append("strong_audio")
+            if duration >= 8.0 and audio["speech_ratio"] < 0.18 and audio["longest_island_s"] < 0.8:
+                flags.append("low_speech_density")
+            if duration >= 8.0 and audio["longest_island_s"] < 0.8:
+                flags.append("fragmented_energy")
+            if 1.5 <= duration < 8.0 and audio["leading_quiet_s"] >= 0.7 and "blocked_phrase" not in flags:
+                flags.append("early_start_candidate")
+        if not flags:
+            continue
+        action = recommended_action_for_flags(flags)
+        issues.append(
+            SubtitleQualityIssue(
+                index=index,
+                start=chunk.start,
+                end=chunk.end,
+                duration=duration,
+                text=chunk.text,
+                flags=flags,
+                recommended_action=action,
+                audio=audio,
+            )
+        )
+    return issues
+
+
+def quality_issues_to_json(issues: list[SubtitleQualityIssue]) -> list[dict[str, Any]]:
+    return [
+        {
+            "index": issue.index,
+            "start": issue.start,
+            "end": issue.end,
+            "duration": issue.duration,
+            "text": issue.text,
+            "flags": issue.flags,
+            "recommended_action": issue.recommended_action,
+            "audio": issue.audio,
+        }
+        for issue in issues
+    ]
+
+
+def recommended_action_for_flags(flags: list[str]) -> str:
+    if "blocked_phrase" in flags or "punctuation_only" in flags:
+        return "drop"
+    if "near_zero_duration" in flags:
+        return "drop"
+    if "flat_audio" in flags and "low_chars_per_second" in flags:
+        return "drop_candidate"
+    if (
+        ("weak_audio_peak" in flags or ("fragmented_energy" in flags and "strong_audio" not in flags))
+        and "low_chars_per_second" in flags
+    ):
+        return "drop_candidate"
+    if "strong_audio" in flags and "fragmented_energy" in flags and "low_chars_per_second" in flags:
+        return "resegment_candidate"
+    if "long_subtitle_split_candidate" in flags:
+        return "split_candidate"
+    if "early_start_candidate" in flags:
+        return "refine_start_candidate"
+    return "review"
+
+
+def audio_stats_for_chunks(wav_path: Path, chunks: list[SubtitleChunk], frame_duration_s: float = 0.05) -> list[dict[str, float | int]]:
+    with wave.open(str(wav_path), "rb") as wav:
+        frame_rate = wav.getframerate()
+        channels = wav.getnchannels()
+        sample_width = wav.getsampwidth()
+        if sample_width != 2:
+            return [_empty_audio_stats() for _ in chunks]
+        return [_audio_stats_for_chunk(wav, frame_rate, channels, chunk, frame_duration_s) for chunk in chunks]
 
 
 def group_chunks_by_timing(
@@ -129,3 +411,178 @@ def _needs_space_between(left: str, right: str) -> bool:
 def _ends_sentence(text: str) -> bool:
     return bool(re.search(r"[\u3002\uff01\uff1f.!?]\s*$", text))
 
+
+def _distribute_subtitle_time(chunk: SubtitleChunk, parts: list[str]) -> list[SubtitleChunk]:
+    total_duration = chunk.end - chunk.start
+    weights = [max(1, len(normalize_phrase(part))) for part in parts]
+    total_weight = sum(weights)
+    cursor = chunk.start
+    result: list[SubtitleChunk] = []
+    for index, (part, weight) in enumerate(zip(parts, weights, strict=True)):
+        if index == len(parts) - 1:
+            end = chunk.end
+        else:
+            end = cursor + total_duration * weight / total_weight
+        result.append(SubtitleChunk(cursor, end, part))
+        cursor = end
+    return result
+
+
+def _split_text_units(text: str) -> list[str]:
+    boundaries = (
+        r"[\u3002\uff01\uff1f.!?]+|"
+        r"(?:くださいね|ください|下さい|ごらん|ちょうだい|していいよ|していい|"
+        r"いいの|いいよ|だよ|だね|なの|ですか|ますか|じゃん|ねえ|はい|うん)"
+    )
+    units: list[str] = []
+    cursor = 0
+    for match in re.finditer(boundaries, text):
+        end = match.end()
+        unit = clean_text(text[cursor:end])
+        if unit:
+            units.append(unit)
+        cursor = end
+    tail = clean_text(text[cursor:])
+    if tail:
+        units.append(tail)
+    return units or [text]
+
+
+def _merge_units_for_balanced_parts(units: list[str], max_parts: int, max_chars: int) -> list[str]:
+    total_chars = sum(len(normalize_phrase(unit)) for unit in units)
+    natural_parts = min(max_parts, len(units))
+    target_parts = min(max_parts, max(2, math.ceil(total_chars / max_chars), natural_parts))
+    parts: list[str] = []
+    current = ""
+    remaining_units = list(units)
+    while remaining_units:
+        remaining_groups = max(1, target_parts - len(parts))
+        remaining_chars = sum(len(normalize_phrase(unit)) for unit in remaining_units)
+        target_chars = max(1, math.ceil(remaining_chars / remaining_groups))
+        unit = remaining_units.pop(0)
+        candidate = current + unit
+        if current and len(normalize_phrase(candidate)) > target_chars and len(parts) < target_parts - 1:
+            parts.append(current)
+            current = unit
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+    if len(parts) > max_parts:
+        return _split_text_by_character_count("".join(parts), max_parts)
+    return parts
+
+
+def _split_text_by_character_count(text: str, parts: int) -> list[str]:
+    normalized_length = len(text)
+    if parts <= 1 or normalized_length <= 1:
+        return [text]
+    chunk_size = math.ceil(normalized_length / parts)
+    return [text[index : index + chunk_size] for index in range(0, normalized_length, chunk_size)]
+
+
+def _char_ngrams(text: str, size: int) -> set[str]:
+    if len(text) <= size:
+        return {text}
+    return {text[index : index + size] for index in range(0, len(text) - size + 1)}
+
+
+def _audio_stats_for_chunk(
+    wav: wave.Wave_read,
+    frame_rate: int,
+    channels: int,
+    chunk: SubtitleChunk,
+    frame_duration_s: float,
+) -> dict[str, float | int]:
+    duration = max(0.0, chunk.end - chunk.start)
+    if duration <= 0:
+        return _empty_audio_stats()
+    start_frame = max(0, int(chunk.start * frame_rate))
+    if start_frame >= wav.getnframes():
+        return _empty_audio_stats()
+    wav.setpos(start_frame)
+    raw = wav.readframes(max(1, int(duration * frame_rate)))
+    samples = array("h")
+    samples.frombytes(raw)
+    if channels > 1:
+        samples = array("h", samples[::channels])
+    samples_per_frame = max(1, int(frame_rate * frame_duration_s))
+    levels: list[float] = []
+    for offset in range(0, len(samples), samples_per_frame):
+        frame = samples[offset : offset + samples_per_frame]
+        if not frame:
+            continue
+        rms = math.sqrt(sum(sample * sample for sample in frame) / len(frame))
+        levels.append(20 * math.log10(max(rms, 1.0) / 32768.0))
+    if not levels:
+        return _empty_audio_stats()
+    median_db = statistics.median(levels)
+    max_db = max(levels)
+    threshold = median_db + 8.0
+    active = [level > threshold for level in levels]
+    speech_frames = sum(1 for value in active if value)
+    longest_island = _longest_true_run(active) * frame_duration_s
+    leading_quiet = _leading_quiet_frames(levels, threshold) * frame_duration_s
+    return {
+        "frame_count": len(levels),
+        "median_db": round(median_db, 3),
+        "max_db": round(max_db, 3),
+        "p90_db": round(sorted(levels)[min(len(levels) - 1, int(len(levels) * 0.9))], 3),
+        "speech_ratio": round(speech_frames / len(levels), 3),
+        "longest_island_s": round(longest_island, 3),
+        "leading_quiet_s": round(leading_quiet, 3),
+    }
+
+
+def _empty_audio_stats() -> dict[str, float | int]:
+    return {
+        "frame_count": 0,
+        "median_db": -120.0,
+        "max_db": -120.0,
+        "p90_db": -120.0,
+        "speech_ratio": 0.0,
+        "longest_island_s": 0.0,
+        "leading_quiet_s": 0.0,
+    }
+
+
+def _longest_true_run(values: list[bool]) -> int:
+    longest = 0
+    current = 0
+    for value in values:
+        if value:
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return longest
+
+
+def _leading_quiet_frames(levels: list[float], threshold: float) -> int:
+    count = 0
+    for level in levels:
+        if level > threshold:
+            break
+        count += 1
+    return count
+
+
+def _is_punctuation_only(text: str) -> bool:
+    normalized = re.sub(r"[\s\u3000]+", "", text)
+    return bool(normalized) and not re.search(r"[\w\u3040-\u30ff\u3400-\u9fff]", normalized)
+
+
+def _looks_like_garbage_cjk(text: str) -> bool:
+    if len(text) < 8:
+        return False
+    cjk_count = len(re.findall(r"[\u3400-\u9fff]", text))
+    kana_count = len(re.findall(r"[\u3040-\u30ff]", text))
+    return cjk_count >= 8 and kana_count == 0 and cjk_count / max(1, len(text)) >= 0.8
+
+
+_BLOCKED_STANDALONE_PHRASES = {
+    "ごめん",
+    "ありがとうございました",
+    "ありがとうございます",
+    "ご視聴ありがとうございました",
+}

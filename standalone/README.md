@@ -2,7 +2,7 @@
 
 언어: **한국어** | [English](README.en.md)
 
-이 문서는 컴퓨터에 익숙하지 않은 분도 따라 할 수 있도록, Docker를 쓰지 않는 standalone 버전의 설치와 사용 방법을 설명합니다.
+이 문서는 컴퓨터에 익숙하지 않은 분도 따라 할 수 있도록, Docker를 쓰지 않는 권장 standalone 버전의 설치와 사용 방법을 설명합니다.
 
 standalone 버전은 동영상 파일을 직접 지정해서 일본어 자막을 만들고, 필요하면 Ollama로 한국어 자막까지 번역합니다. `ffmpeg`는 따로 설치하지 않아도 됩니다.
 
@@ -16,7 +16,7 @@ PowerShell 명령어가 부담스럽다면 아래 두 파일부터 사용하세�
 2. 설치가 끝나면 `run-kotoba.bat`를 더블클릭합니다.
 3. 작은 창이 뜨면 영상 파일이나 폴더를 선택하고 `시작`을 누릅니다.
 
-`run-kotoba.bat`는 내부적으로 `kotoba-launcher`를 실행합니다. 런처에서는 입력 파일/폴더, 결과 폴더, 자동 무음 기준, 한국어 번역 여부, Ollama 번역 모델을 화면에서 고를 수 있습니다.
+`run-kotoba.bat`는 내부적으로 `kotoba-launcher`를 실행합니다. 런처에서는 입력 파일/폴더, 결과 폴더, 한국어 번역 여부와 Ollama 번역 모델을 화면에서 고를 수 있습니다. 음성 구간 검출은 번들된 pyannote를 자동으로 사용합니다. 실험적인 자막 품질 후처리는 CLI에서만 사용할 수 있습니다.
 
 명령어를 직접 쓰는 방법은 아래에 계속 정리해 두었습니다. 문제가 생겼을 때는 명령어 방식이 원인 파악에 더 편합니다.
 
@@ -70,7 +70,7 @@ cd C:\Python\Kotoba-Whisper-CLI\standalone
 처음 한 번만 실행합니다.
 
 ```powershell
-uv sync --group transcribe --group cuda
+uv sync --group transcribe --group cuda --group pyannote
 ```
 
 다운로드가 오래 걸릴 수 있습니다. PyTorch와 CUDA 관련 파일이 크기 때문입니다.
@@ -90,7 +90,7 @@ uv run --group transcribe --group cuda kotoba-launcher
 ## 5. 짧은 샘플로 자막 추출 테스트
 
 ```powershell
-uv run --group transcribe --group cuda kotoba process "..\sample\ja_short_test.mp4" --output-dir ".\tmp-output" --auto-silence-threshold
+uv run --no-sync kotoba process "..\sample\ja_short_test.mp4" --output-dir ".\tmp-output"
 ```
 
 성공하면 `tmp-output` 폴더에 아래와 같은 파일이 생깁니다.
@@ -105,29 +105,96 @@ uv run --group transcribe --group cuda kotoba process "..\sample\ja_short_test.m
 파일 하나를 처리하려면:
 
 ```powershell
-uv run --group transcribe --group cuda kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output" --auto-silence-threshold
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output"
 ```
 
 폴더 안의 동영상을 한 번에 처리하려면:
 
 ```powershell
-uv run --group transcribe --group cuda kotoba process "D:\Videos" --output-dir ".\tmp-output" --auto-silence-threshold
+uv run --no-sync kotoba process "D:\Videos" --output-dir ".\tmp-output"
 ```
 
 폴더 입력은 해당 폴더 바로 아래의 미디어 파일만 처리합니다. 하위 폴더까지 재귀적으로 들어가지는 않습니다.
 
 ## 자막 타이밍 옵션
 
-기본값으로 VAD pre-split이 켜져 있습니다. 프로그램은 먼저 무음 구간을 찾고, 말을 하는 구간만 잘라서 전사한 뒤 원래 영상 시간으로 다시 맞춥니다.
+기본값으로 pyannote VAD pre-split이 켜져 있습니다. 프로그램은 사람 음성 구간을 찾아 해당 구간을 전사한 뒤 원래 영상 시간으로 다시 맞춥니다.
 
 자주 쓰는 옵션은 아래 정도입니다.
 
-- `--auto-silence-threshold`: 파일 전체 음량을 보고 무음 기준을 자동으로 잡습니다.
-- `--silence-threshold-db -42dB`: 무음 기준을 직접 지정합니다.
 - `--no-vad-pre-split`: VAD 분할 없이 전체 오디오를 한 번에 전사합니다.
 - `--vad-padding-s 0.4`: 말 앞뒤로 약간의 여유 시간을 붙입니다.
 
-처음에는 `--auto-silence-threshold`를 붙여 쓰는 것을 권장합니다.
+일반 사용자는 VAD 옵션을 지정할 필요가 없습니다. 기존 음량 기반 방식을 비교해야 하는 경우에만 CLI에서 `--vad-engine ffmpeg`를 사용합니다. 이때 `--auto-silence-threshold` 또는 `--silence-threshold-db -42dB`를 함께 지정할 수 있습니다. 이 고급 FFmpeg 옵션은 GUI에는 표시되지 않습니다.
+
+### 기본 pyannote VAD
+
+standalone은 배경 음악이나 지속적인 잡음에서도 사람 음성을 구분하기 위해 pyannote VAD를 기본으로 사용합니다.
+
+기본 `install-windows.bat`는 pyannote 의존성까지 함께 설치합니다. 기존 standalone 환경에 pyannote만 추가하려면 `install-pyannote-windows.bat`를 한 번 실행하거나 다음 명령을 사용합니다.
+
+```powershell
+uv sync --group transcribe --group cuda --group pyannote
+```
+
+기본 모델 `pyannote/segmentation-3.0`의 원본 가중치는 MIT 라이선스에 따라 standalone에 포함되어 있습니다. 따라서 기본 모델을 사용할 때는 Hugging Face 계정, 사용 조건 동의 또는 토큰 로그인이 필요하지 않습니다.
+
+- 원본 모델: <https://huggingface.co/pyannote/segmentation-3.0>
+- 고정 revision: `e66f3d3b9eb0873085418a7b813d3b369bf160bb`
+- 번들 위치: `src/kotoba_standalone/models/pyannote-segmentation-3.0`
+- 원본 `LICENSE`, 모델 카드, 파일 checksum을 번들 폴더에 함께 보존합니다.
+
+그다음 아래처럼 실행합니다.
+
+```powershell
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output"
+```
+
+GUI는 pyannote를 자동으로 사용하며 FFmpeg 관련 설정을 표시하지 않습니다. pyannote 실행이 끝나면 모델을 GPU 메모리에서 내린 뒤 Kotoba를 로드하므로 두 모델이 GPU에 계속 함께 남지는 않습니다.
+
+- `--vad-engine pyannote`: 기본값이며 `pyannote/segmentation-3.0`으로 사람 음성 구간을 검출합니다.
+- `--vad-engine ffmpeg`: 기존 음량 기반 VAD를 CLI에서 비교할 때만 사용합니다.
+- `--pyannote-model`: 다른 로컬 checkpoint 또는 Hugging Face 모델을 지정할 때 사용합니다. 원격 gated 모델은 해당 사용자가 별도로 접근 권한과 토큰을 준비해야 합니다.
+
+pyannote를 선택하면 `--auto-silence-threshold`와 `--silence-threshold-db`는 사용하지 않습니다. 결과의 `*.process.json`에는 VAD 엔진, pyannote 버전, 모델 이름, `bundled/local/huggingface` 출처와 검출된 음성 구간 수가 기록됩니다. `*.vad.json`에는 pyannote가 처음 검출한 구간과 실제 Kotoba 전사에 사용한 구간이 모두 저장됩니다.
+
+## 자막 품질 실험 옵션(CLI 전용)
+
+난도가 높은 영상에서는 ASR이 무음이나 반복 소리에서 가짜 자막을 만들거나, 0.01초짜리 표시 불가능한 자막을 만들 수 있습니다. 아래 옵션은 아직 실험용이며 기본값은 꺼져 있습니다.
+
+```powershell
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output" --report-subtitle-quality --drop-likely-hallucinations --split-long-subtitles
+```
+
+- `--report-subtitle-quality`: `*.subtitle-quality.json` 리포트를 만듭니다.
+- `--drop-likely-hallucinations`: 확실한 오탐 자막만 제거합니다.
+- `--split-long-subtitles`: 긴 정상 자막을 텍스트 경계 기준으로 나눕니다.
+- `--tail-retranscribe-long-subtitles`: 10~30초짜리 의심 자막의 뒤쪽 5초를 다시 전사해, 원문과 비슷하면 시작 시간을 뒤로 보정합니다.
+- `--tail-retranscribe-max-candidates 20`: 뒤쪽 5초 재전사 시도 개수입니다. 재분할 후보와 긴 후보를 우선 처리합니다.
+- `--annotate-subtitle-quality`: SRT 본문 아래 줄에 품질 태그를 붙입니다.
+
+현재 자동 제거 대상은 보수적으로 제한되어 있습니다.
+
+- `ごめん`, `ありがとうございました`, `ありがとうございます`, `ご視聴ありがとうございました` 단독 자막
+- 구두점만 있는 자막
+- 0.3초 미만인데 텍스트가 긴 표시 불가능 자막
+
+리포트에는 삭제하지 않고 검토만 필요한 후보도 표시됩니다.
+
+- `drop_candidate`: 긴 저밀도 오탐 의심
+- `refine_start_candidate`: 자막 시작이 너무 빠른 의심
+- `resegment_candidate`: 긴 유성 구간을 다시 쪼개 전사할 후보
+- `split_candidate`: 긴 정상 자막을 나눌 후보
+
+`--tail-retranscribe-long-subtitles`는 `drop_candidate` 또는 `resegment_candidate` 중 10~30초 길이의 자막만 대상으로 삼습니다. 뒤쪽 5초 재전사 결과가 기존 자막과 충분히 비슷할 때만 보정하며, 시도 결과는 `tail_refine_attempts` 항목으로 리포트에 남깁니다. 기본값은 재분할 후보를 먼저 보고, 그 안에서 긴 후보부터 최대 20개입니다.
+
+품질 태그를 화면에서 직접 확인하려면:
+
+```powershell
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output" --report-subtitle-quality --annotate-subtitle-quality
+```
+
+`--annotate-subtitle-quality`는 SRT 텍스트에 `[quality: ...]` 줄을 실제로 추가하므로 Subtitle Edit이나 동영상 플레이어에서 검토할 때만 사용하세요. 번역까지 함께 실행하면 태그도 번역 입력에 들어갈 수 있습니다.
 
 ## Ollama 설치
 
@@ -183,7 +250,7 @@ uv run kotoba translate ".\tmp-output\sample.ja.srt" --model-choice
 번역이 성공하면 사용한 모델이 아래 파일에 저장됩니다.
 
 ```text
-standalone\config\translation-defaults.json
+config\translation-defaults.json
 ```
 
 다음부터는 `--model`을 생략해도 저장된 모델을 다시 사용합니다.
@@ -191,7 +258,7 @@ standalone\config\translation-defaults.json
 ## 자막 추출과 번역을 한 번에 실행
 
 ```powershell
-uv run --group transcribe --group cuda kotoba process "D:\Videos\sample.mp4" --translate --translation-model-choice --auto-silence-threshold
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --translate --translation-model-choice
 ```
 
 번역까지 성공하면 한국어 자막은 두 곳에 저장됩니다.

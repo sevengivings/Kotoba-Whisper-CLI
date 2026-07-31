@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from kotoba_standalone.media import SilenceSpan, parse_silencedetect_output, speech_spans_from_silences
+from kotoba_standalone.media import (
+    SilenceSpan,
+    normalize_speech_spans,
+    parse_silencedetect_output,
+    speech_spans_from_silences,
+)
 
 
 def test_parse_silencedetect_output_pairs_start_and_end() -> None:
@@ -32,4 +37,20 @@ def test_speech_spans_from_silences_applies_padding_and_max_duration() -> None:
         SilenceSpan(2.8, 5.8),
         SilenceSpan(5.8, 7.2),
         SilenceSpan(7.8, 10.0),
+    ]
+
+
+def test_normalize_speech_spans_filters_pads_merges_and_splits() -> None:
+    spans = normalize_speech_spans(
+        duration_s=10.0,
+        spans=[SilenceSpan(0.1, 0.2), SilenceSpan(1.0, 2.0), SilenceSpan(2.3, 4.0)],
+        min_duration_s=0.25,
+        max_duration_s=2.0,
+        padding_s=0.2,
+        merge_gap_s=0.0,
+    )
+
+    assert spans == [
+        SilenceSpan(0.8, 2.8),
+        SilenceSpan(2.8, 4.2),
     ]

@@ -214,7 +214,30 @@ def speech_spans_from_silences(
         cursor = max(cursor, silence.end)
     if duration_s - cursor >= min_duration_s:
         speech_spans.append(_padded_span(cursor, duration_s, duration_s, padding_s))
-    return _split_merged_spans(speech_spans, max_duration_s, merge_gap_s)
+    return normalize_speech_spans(
+        duration_s,
+        speech_spans,
+        min_duration_s,
+        max_duration_s,
+        0.0,
+        merge_gap_s,
+    )
+
+
+def normalize_speech_spans(
+    duration_s: float,
+    spans: list[SilenceSpan],
+    min_duration_s: float,
+    max_duration_s: float,
+    padding_s: float = 0.0,
+    merge_gap_s: float = 0.0,
+) -> list[SilenceSpan]:
+    normalized = [
+        _padded_span(span.start, span.end, duration_s, padding_s)
+        for span in spans
+        if span.end - span.start >= min_duration_s
+    ]
+    return _split_merged_spans(normalized, max_duration_s, merge_gap_s)
 
 
 def _wav_frame_dbfs(wav_path: Path, frame_duration_s: float) -> list[float]:
@@ -277,7 +300,10 @@ def _split_merged_spans(spans: list[SilenceSpan], max_duration_s: float, merge_g
             merged.append(span)
             continue
         previous = merged[-1]
-        can_merge = span.start - previous.end <= merge_gap_s and span.end - previous.start <= max_duration_s
+        overlaps = span.start <= previous.end
+        can_merge = overlaps or (
+            span.start - previous.end <= merge_gap_s and span.end - previous.start <= max_duration_s
+        )
         if can_merge:
             merged[-1] = SilenceSpan(previous.start, span.end)
         else:

@@ -24,6 +24,13 @@ def test_iter_media_files_defaults_to_top_level_only(tmp_path: Path) -> None:
     assert cli.iter_media_files(tmp_path) == [tmp_path / "a.mp4"]
 
 
+def test_process_parser_defaults_to_pyannote(tmp_path: Path) -> None:
+    args = cli.build_parser().parse_args(["process", str(tmp_path / "a.mp4")])
+
+    assert args.vad_engine == "pyannote"
+    assert args.auto_silence_threshold is False
+
+
 def test_process_directory_processes_each_media_file(tmp_path: Path, monkeypatch) -> None:
     calls: list[Path] = []
     (tmp_path / "a.mp4").write_text("", encoding="utf-8")
@@ -97,6 +104,33 @@ def test_process_file_prints_human_readable_summary(tmp_path: Path, monkeypatch,
     assert "Korean SRT:" in captured.out
     assert "Copied Korean SRT:" in captured.out
     assert "{" not in captured.out
+
+
+def test_process_file_returns_failure_for_vad_error(tmp_path: Path, monkeypatch, capsys) -> None:
+    media_path = tmp_path / "a.mp4"
+    media_path.write_text("", encoding="utf-8")
+
+    def fake_process_video(input_path: Path, options, progress=None) -> ProcessResult:
+        return ProcessResult(
+            input_path=input_path,
+            output_dir=tmp_path,
+            wav_path=tmp_path / "a.wav",
+            ja_srt_path=None,
+            ko_srt_path=None,
+            copied_ko_srt_path=None,
+            status="vad_error",
+            message="Hugging Face access is required",
+        )
+
+    monkeypatch.setattr(cli, "process_video", fake_process_video)
+    monkeypatch.setattr(cli, "tqdm_progress", null_progress)
+
+    exit_code = cli.main(["process", str(media_path), "--vad-engine", "pyannote"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Finished with status: vad_error" in captured.out
+    assert "Hugging Face access is required" in captured.out
 
 
 def test_resolve_translation_model_uses_saved_model(monkeypatch) -> None:

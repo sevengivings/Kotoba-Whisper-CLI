@@ -32,7 +32,7 @@ if errorlevel 1 (
 
 echo.
 echo Installing Python packages. This can take a long time on the first run.
-uv sync --group transcribe --group cuda
+uv sync --group transcribe --group cuda --group pyannote
 if errorlevel 1 (
   echo.
   echo Python package installation failed.

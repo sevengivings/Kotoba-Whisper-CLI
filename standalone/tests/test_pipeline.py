@@ -8,7 +8,9 @@ import pytest
 
 import kotoba_standalone.pipeline as pipeline
 from kotoba_standalone.media import SilenceSpan
-from kotoba_standalone.pipeline import process_video, validate_silence_threshold
+from kotoba_standalone.pipeline import process_video, tail_retranscribe_long_subtitles, validate_silence_threshold
+from kotoba_standalone.pyannote_vad import PyannoteVadDependencyError, PyannoteVadResult
+from kotoba_standalone.subtitle import SubtitleChunk, SubtitleQualityIssue
 from kotoba_standalone.transcriber import TranscriptionDependencyError
 from kotoba_standalone.types import ProcessOptions, ProgressEvent
 
@@ -45,7 +47,11 @@ def test_process_video_handles_missing_transcription_dependency(tmp_path: Path, 
     monkeypatch.setattr(pipeline, "KotobaTranscriber", MissingTranscriber)
     monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
 
-    result = process_video(media, ProcessOptions(output_dir=tmp_path / "out"), progress=events.append)
+    result = process_video(
+        media,
+        ProcessOptions(output_dir=tmp_path / "out", vad_engine="ffmpeg"),
+        progress=events.append,
+    )
 
     assert result.status == "missing_transcription_dependency"
     assert result.output_dir == tmp_path / "out"
@@ -76,11 +82,47 @@ def test_process_video_writes_subtitles_with_fake_transcriber(tmp_path: Path, mo
     monkeypatch.setattr(pipeline, "KotobaTranscriber", FakeTranscriber)
     monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
 
-    result = process_video(media, ProcessOptions(output_dir=tmp_path / "out"))
+    result = process_video(media, ProcessOptions(output_dir=tmp_path / "out", vad_engine="ffmpeg"))
 
     assert result.status == "success"
     assert result.ja_srt_path == tmp_path / "out" / "ja_short_test.ja.srt"
     assert (tmp_path / "out" / "ja_short_test.ja.srt").read_text(encoding="utf-8").strip()
+
+
+def test_process_video_can_drop_likely_hallucinations_and_write_quality_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeTranscriber:
+        def __init__(self, options: ProcessOptions) -> None:
+            self.options = options
+
+        def load(self) -> None:
+            return None
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            return FakeResult(0.0, 1.0, "ありがとうございました")
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, "KotobaTranscriber", FakeTranscriber)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
+
+    result = process_video(
+        media,
+        ProcessOptions(
+            output_dir=tmp_path / "out",
+            drop_likely_hallucinations=True,
+            vad_engine="ffmpeg",
+        ),
+    )
+
+    assert result.status == "success"
+    assert (tmp_path / "out" / "ja_short_test.ja.srt").read_text(encoding="utf-8") == ""
+    quality = json.loads((tmp_path / "out" / "ja_short_test.subtitle-quality.json").read_text(encoding="utf-8"))
+    assert quality["dropped_count"] == 1
+    assert quality["dropped"][0]["flags"] == ["blocked_phrase"]
+    process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
+    assert process_meta["dropped_likely_hallucination_count"] == 1
 
 
 def test_process_video_can_translate_after_transcription(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -109,7 +151,10 @@ def test_process_video_can_translate_after_transcription(tmp_path: Path, monkeyp
     monkeypatch.setattr(pipeline, "translate_srt", fake_translate_srt)
     monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
 
-    result = process_video(media, ProcessOptions(output_dir=tmp_path / "out", translate=True))
+    result = process_video(
+        media,
+        ProcessOptions(output_dir=tmp_path / "out", translate=True, vad_engine="ffmpeg"),
+    )
 
     assert result.status == "success"
     assert result.ko_srt_path == tmp_path / "out" / "ja_short_test.ko.srt"
@@ -147,7 +192,10 @@ def test_process_video_copies_translated_subtitle_with_ko_suffix_when_srt_exists
     monkeypatch.setattr(pipeline, "translate_srt", fake_translate_srt)
     monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
 
-    result = process_video(media, ProcessOptions(output_dir=tmp_path / "out", translate=True))
+    result = process_video(
+        media,
+        ProcessOptions(output_dir=tmp_path / "out", translate=True, vad_engine="ffmpeg"),
+    )
 
     assert result.status == "success"
     assert result.copied_ko_srt_path == tmp_path / "media" / "video.ko.srt"
@@ -178,7 +226,7 @@ def test_process_video_offsets_vad_segment_timestamps(tmp_path: Path, monkeypatc
         lambda *args: [SilenceSpan(0.0, 1.0), SilenceSpan(2.0, 3.0)],
     )
 
-    result = process_video(media, ProcessOptions(output_dir=tmp_path / "out"))
+    result = process_video(media, ProcessOptions(output_dir=tmp_path / "out", vad_engine="ffmpeg"))
 
     assert result.status == "success"
     raw = json.loads((tmp_path / "out" / "ja_short_test.raw.json").read_text(encoding="utf-8"))
@@ -186,3 +234,131 @@ def test_process_video_offsets_vad_segment_timestamps(tmp_path: Path, monkeypatc
     assert raw["chunks"][1]["timestamp"] == [2.2, 2.7]
     process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
     assert process_meta["transcription_segment_count"] == 2
+
+
+def test_process_video_uses_pyannote_speech_spans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeTranscriber:
+        calls: list[str] = []
+
+        def __init__(self, options: ProcessOptions) -> None:
+            self.options = options
+
+        def load(self) -> None:
+            return None
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            self.calls.append(wav_path)
+            return FakeResult(0.1, 0.6, f"text {len(self.calls)}")
+
+    def fake_pyannote(*args: object, **kwargs: object) -> PyannoteVadResult:
+        return PyannoteVadResult(
+            speech_spans=[SilenceSpan(1.0, 2.0), SilenceSpan(4.0, 5.0)],
+            model_name="pyannote/segmentation-3.0",
+            device="cuda:0",
+            pyannote_audio_version="3.4.0",
+            model_source="bundled",
+            model_revision="e66f3d3b9eb0873085418a7b813d3b369bf160bb",
+        )
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, "KotobaTranscriber", FakeTranscriber)
+    monkeypatch.setattr(pipeline, "detect_speech_spans_pyannote", fake_pyannote)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: pytest.fail("FFmpeg VAD should not run"))
+
+    result = process_video(
+        media,
+        ProcessOptions(
+            output_dir=tmp_path / "out",
+            vad_engine="pyannote",
+            vad_padding_s=0.0,
+        ),
+    )
+
+    assert result.status == "success"
+    raw = json.loads((tmp_path / "out" / "ja_short_test.raw.json").read_text(encoding="utf-8"))
+    assert raw["chunks"][0]["timestamp"] == [1.1, 1.6]
+    assert raw["chunks"][1]["timestamp"] == [4.1, 4.6]
+    process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
+    assert process_meta["vad_engine"] == "pyannote"
+    assert process_meta["detected_speech_count"] == 2
+    assert process_meta["pyannote_vad"]["pyannote_audio_version"] == "3.4.0"
+    assert process_meta["pyannote_vad"]["model_source"] == "bundled"
+    assert process_meta["pyannote_vad"]["model_revision"] == "e66f3d3b9eb0873085418a7b813d3b369bf160bb"
+    assert process_meta["vad_report"].endswith("ja_short_test.vad.json")
+    vad_report = json.loads((tmp_path / "out" / "ja_short_test.vad.json").read_text(encoding="utf-8"))
+    assert vad_report["raw_speech_spans"][0] == {"start": 1.0, "end": 2.0, "duration": 1.0}
+    assert len(vad_report["transcription_spans"]) == 2
+
+
+def test_process_video_reports_pyannote_dependency_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def missing_pyannote(*args: object, **kwargs: object) -> PyannoteVadResult:
+        raise PyannoteVadDependencyError("install the pyannote group")
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, "detect_speech_spans_pyannote", missing_pyannote)
+
+    result = process_video(
+        media,
+        ProcessOptions(output_dir=tmp_path / "out", vad_engine="pyannote"),
+    )
+
+    assert result.status == "vad_error"
+    assert result.ja_srt_path is None
+    assert result.message == "install the pyannote group"
+
+
+def test_process_video_skips_kotoba_when_pyannote_finds_no_speech(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnexpectedTranscriber:
+        def __init__(self, options: ProcessOptions) -> None:
+            pytest.fail("Kotoba should not load when pyannote found no speech")
+
+    def no_speech(*args: object, **kwargs: object) -> PyannoteVadResult:
+        return PyannoteVadResult([], "pyannote/segmentation-3.0", "cuda:0", "3.4.0")
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, "KotobaTranscriber", UnexpectedTranscriber)
+    monkeypatch.setattr(pipeline, "detect_speech_spans_pyannote", no_speech)
+
+    result = process_video(
+        media,
+        ProcessOptions(output_dir=tmp_path / "out", vad_engine="pyannote"),
+    )
+
+    assert result.status == "success"
+    assert (tmp_path / "out" / "ja_short_test.ja.srt").read_text(encoding="utf-8") == ""
+    process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
+    assert process_meta["transcription_segment_count"] == 0
+
+
+def test_tail_retranscribe_rejects_too_short_tail_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeTailTranscriber:
+        def transcribe(self, wav_path: str) -> FakeResult:
+            return FakeResult(0.0, 1.0, "\u3042\u3042")
+
+    chunk = SubtitleChunk(10.0, 40.0, "\u3042\u3042\u306f\u3044\u3042\u3042")
+    issue = SubtitleQualityIssue(
+        index=1,
+        start=chunk.start,
+        end=chunk.end,
+        duration=chunk.end - chunk.start,
+        text=chunk.text,
+        flags=["long_duration_short_text"],
+        recommended_action="drop_candidate",
+    )
+    monkeypatch.setattr(pipeline, "extract_audio_segment", lambda *args: None)
+
+    refined, applied, attempts = tail_retranscribe_long_subtitles(
+        [chunk],
+        [issue],
+        tmp_path / "source.wav",
+        tmp_path,
+        "sample",
+        FakeTailTranscriber(),  # type: ignore[arg-type]
+    )
+
+    assert refined == [chunk]
+    assert applied == []
+    assert attempts[0]["accepted"] is False

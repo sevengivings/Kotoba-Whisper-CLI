@@ -20,7 +20,6 @@ from kotoba_standalone.translate.ollama import OllamaUnavailableError, Translati
 class LauncherOptions:
     input_path: Path
     output_dir: Path
-    auto_silence_threshold: bool = True
     translate: bool = False
     translation_model: str = ""
     korean_style: str = "polite"
@@ -50,9 +49,9 @@ def build_process_command(options: LauncherOptions) -> list[str]:
         str(options.output_dir),
         "--model-device",
         options.model_device,
+        "--vad-engine",
+        "pyannote",
     ]
-    if options.auto_silence_threshold:
-        command.append("--auto-silence-threshold")
     if options.translate:
         command.append("--translate")
         if options.translation_model.strip():
@@ -72,7 +71,6 @@ class KotobaLauncher:
 
         self.input_path = StringVar()
         self.output_dir = StringVar(value=str(Path.cwd() / "tmp-output"))
-        self.auto_silence = BooleanVar(value=True)
         self.translate = BooleanVar(value=False)
         self.model = StringVar(value=load_saved_translation_model() or DEFAULT_TRANSLATION_MODEL)
         self.korean_style = StringVar(value="polite")
@@ -86,7 +84,7 @@ class KotobaLauncher:
         outer = ttk.Frame(self.root, padding=14)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(1, weight=1)
-        outer.rowconfigure(8, weight=1)
+        outer.rowconfigure(7, weight=1)
 
         ttk.Label(outer, text="입력 영상 또는 폴더").grid(row=0, column=0, sticky="w", pady=4)
         ttk.Entry(outer, textvariable=self.input_path).grid(row=0, column=1, sticky="ew", padx=8)
@@ -97,39 +95,35 @@ class KotobaLauncher:
         ttk.Entry(outer, textvariable=self.output_dir).grid(row=1, column=1, sticky="ew", padx=8)
         ttk.Button(outer, text="선택", command=self.choose_output_dir).grid(row=1, column=2, columnspan=2, sticky="ew", padx=3)
 
-        ttk.Checkbutton(outer, text="자동 무음 기준 사용", variable=self.auto_silence).grid(
+        ttk.Checkbutton(outer, text="한국어 번역까지 실행", variable=self.translate).grid(
             row=2, column=1, sticky="w", padx=8, pady=4
         )
 
-        ttk.Checkbutton(outer, text="한국어 번역까지 실행", variable=self.translate).grid(
-            row=3, column=1, sticky="w", padx=8, pady=4
-        )
-
-        ttk.Label(outer, text="번역 모델").grid(row=4, column=0, sticky="w", pady=4)
-        ttk.Entry(outer, textvariable=self.model).grid(row=4, column=1, sticky="ew", padx=8)
+        ttk.Label(outer, text="번역 모델").grid(row=3, column=0, sticky="w", pady=4)
+        ttk.Entry(outer, textvariable=self.model).grid(row=3, column=1, sticky="ew", padx=8)
         ttk.Button(outer, text="Ollama 모델", command=self.load_ollama_models).grid(
-            row=4, column=2, columnspan=2, sticky="ew", padx=3
+            row=3, column=2, columnspan=2, sticky="ew", padx=3
         )
 
-        ttk.Label(outer, text="한국어 말투").grid(row=5, column=0, sticky="w", pady=4)
+        ttk.Label(outer, text="한국어 말투").grid(row=4, column=0, sticky="w", pady=4)
         ttk.Combobox(
             outer,
             textvariable=self.korean_style,
             values=("polite", "banmal", "strict-banmal"),
             state="readonly",
             width=18,
-        ).grid(row=5, column=1, sticky="w", padx=8)
+        ).grid(row=4, column=1, sticky="w", padx=8)
 
-        ttk.Label(outer, text="처리 장치").grid(row=6, column=0, sticky="w", pady=4)
+        ttk.Label(outer, text="처리 장치").grid(row=5, column=0, sticky="w", pady=4)
         ttk.Combobox(
             outer,
             textvariable=self.model_device,
             values=("cuda:0", "cpu"),
             width=18,
-        ).grid(row=6, column=1, sticky="w", padx=8)
+        ).grid(row=5, column=1, sticky="w", padx=8)
 
         buttons = ttk.Frame(outer)
-        buttons.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(10, 8))
+        buttons.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(10, 8))
         buttons.columnconfigure(0, weight=1)
         self.run_button = ttk.Button(buttons, text="시작", command=self.start)
         self.run_button.grid(row=0, column=1, padx=4)
@@ -138,7 +132,7 @@ class KotobaLauncher:
         ttk.Label(buttons, textvariable=self.status).grid(row=0, column=0, sticky="w")
 
         self.log = ScrolledText(outer, height=18, wrap="word")
-        self.log.grid(row=8, column=0, columnspan=4, sticky="nsew")
+        self.log.grid(row=7, column=0, columnspan=4, sticky="nsew")
 
     def choose_file(self) -> None:
         selected = filedialog.askopenfilename(title="처리할 영상 또는 오디오 파일을 선택하세요")
@@ -174,7 +168,6 @@ class KotobaLauncher:
         options = LauncherOptions(
             input_path=Path(input_text),
             output_dir=Path(self.output_dir.get().strip() or Path.cwd() / "tmp-output"),
-            auto_silence_threshold=self.auto_silence.get(),
             translate=self.translate.get(),
             translation_model=self.model.get(),
             korean_style=self.korean_style.get(),

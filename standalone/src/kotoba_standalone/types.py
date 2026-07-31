@@ -6,6 +6,7 @@ from typing import Literal
 
 
 KoreanStyle = Literal["polite", "banmal", "strict-banmal"]
+VadEngine = Literal["ffmpeg", "pyannote"]
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,8 @@ class ProcessOptions:
     min_silence_duration_s: float = 0.5
     auto_silence_threshold: bool = False
     vad_pre_split: bool = True
+    vad_engine: VadEngine = "pyannote"
+    pyannote_model: str = "pyannote/segmentation-3.0"
     vad_max_segment_duration_s: float = 30.0
     vad_min_speech_duration_s: float = 0.25
     vad_padding_s: float = 0.4
@@ -35,6 +38,12 @@ class ProcessOptions:
     model_name: str = "kotoba-tech/kotoba-whisper-v2.2"
     model_device: str = "cuda:0"
     model_dtype: str = "float16"
+    report_subtitle_quality: bool = False
+    drop_likely_hallucinations: bool = False
+    split_long_subtitles: bool = False
+    annotate_subtitle_quality: bool = False
+    tail_retranscribe_long_subtitles: bool = False
+    tail_retranscribe_max_candidates: int = 20
     translate: bool = False
     translation_model: str = "hf.co/mradermacher/Hy-MT2-30B-A3B-GGUF:Q4_K_M"
     ollama_host: str = "localhost"

@@ -13,7 +13,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-uv run --group transcribe --group cuda kotoba-launcher
+uv run --no-sync kotoba-launcher
 if errorlevel 1 (
   echo.
   echo Kotoba launcher closed with an error.

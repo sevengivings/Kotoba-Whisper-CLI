@@ -12,14 +12,15 @@ def test_format_elapsed_korean() -> None:
     assert format_elapsed_korean(3661) == "1시간 1분 1초"
 
 
-def test_build_process_command_defaults_to_process_with_auto_threshold(tmp_path: Path) -> None:
+def test_build_process_command_defaults_to_pyannote(tmp_path: Path) -> None:
     command = build_process_command(
         LauncherOptions(input_path=tmp_path / "sample.mp4", output_dir=tmp_path / "out")
     )
 
     assert command[:4] == [sys.executable, "-m", "kotoba_standalone.cli", "process"]
     assert str(tmp_path / "sample.mp4") in command
-    assert "--auto-silence-threshold" in command
+    assert "--auto-silence-threshold" not in command
+    assert command[command.index("--vad-engine") + 1] == "pyannote"
     assert "--translate" not in command
 
 
@@ -37,3 +38,20 @@ def test_build_process_command_adds_translation_options(tmp_path: Path) -> None:
     assert "--translate" in command
     assert command[command.index("--translation-model") + 1] == "chosen:model"
     assert command[command.index("--korean-style") + 1] == "strict-banmal"
+
+
+def test_build_process_command_does_not_expose_ffmpeg_vad_options(tmp_path: Path) -> None:
+    command = build_process_command(
+        LauncherOptions(
+            input_path=tmp_path / "sample.mp4",
+            output_dir=tmp_path / "out",
+        )
+    )
+
+    assert command[command.index("--vad-engine") + 1] == "pyannote"
+    assert "--auto-silence-threshold" not in command
+    assert "--report-subtitle-quality" not in command
+    assert "--drop-likely-hallucinations" not in command
+    assert "--split-long-subtitles" not in command
+    assert "--annotate-subtitle-quality" not in command
+    assert "--tail-retranscribe-long-subtitles" not in command

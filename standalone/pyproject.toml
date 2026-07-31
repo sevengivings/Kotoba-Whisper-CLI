@@ -28,6 +28,10 @@ cuda = [
     "torch==2.5.1",
     "torchaudio==2.5.1",
 ]
+pyannote = [
+    "pyannote.audio==3.4.0",
+    "speechbrain==1.0.3",
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu121"
@@ -44,6 +48,9 @@ kotoba-launcher = "kotoba_standalone.launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+kotoba_standalone = ["models/pyannote-segmentation-3.0/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
