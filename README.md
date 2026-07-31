@@ -1,5 +1,12 @@
 # Kotoba-Whisper CLI
 
+언어: **한국어** | [English](README.en.md)
+
+처음 설치하는 분이라면 Docker 기반 버전보다 standalone 버전을 먼저 권장합니다.
+
+- [standalone 한국어 설치/사용 안내](standalone/README.md)
+- [standalone English guide](standalone/README.en.md)
+
 Windows 또는 Linux + Docker 환경에서 `input` 폴더에 넣은 영상/음성 파일을 `kotoba-tech/kotoba-whisper-v2.2`로 일본어 전사하고 SRT/TXT/JSON 결과를 생성하는 폴더 감시형 CLI입니다.
 
 ## 주요 기능
