@@ -1,6 +1,9 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+.venv/
+*.egg-info/
+/standalone/tmp-output/
 /input/*
 /processing/*
 /output/*

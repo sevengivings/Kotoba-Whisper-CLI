@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kotoba-standalone"
+version = "0.1.0"
+description = "Standalone Kotoba Whisper processing CLI without Docker watcher scripts."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "imageio-ffmpeg>=0.5.1",
+    "tqdm>=4.66.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+]
+transcribe = [
+    "huggingface-hub==0.26.5",
+    "protobuf==5.29.1",
+    "safetensors==0.4.5",
+    "sentencepiece==0.2.0",
+    "transformers==4.46.3",
+]
+cuda = [
+    "torch==2.5.1",
+    "torchaudio==2.5.1",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }
+
+[project.scripts]
+kotoba = "kotoba_standalone.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

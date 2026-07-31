@@ -82,6 +82,8 @@ docker compose up -d --build
 
 ## 시작
 
+현재 루트 프로젝트는 Docker 기반 안정판입니다. 초보자용 단독 실행판은 `standalone/`에서 별도로 준비 중이며, uv 기반 CLI, 별도 설치 없는 ffmpeg 오디오 추출, Ollama 번역부터 점진적으로 구현합니다.
+
 ```powershell
 cd C:\Python\Kotoba-Whisper-CLI
 docker compose up -d
