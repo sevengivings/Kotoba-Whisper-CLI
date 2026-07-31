@@ -13,9 +13,10 @@ For new users who mainly want to process local media files directly, start with 
 
 - [Standalone Korean guide](standalone/README.md)
 - [Standalone English guide](standalone/README.en.md)
+- Beginner-friendly Windows standalone flow: run `standalone\install-windows.bat`, then `standalone\run-kotoba.bat`.
+- Distribution/license notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 The recommended translation models are:
 
 - Best quality: `hf.co/mradermacher/Hy-MT2-30B-A3B-GGUF:Q4_K_M`
 - Minimum recommended: `hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M`
-

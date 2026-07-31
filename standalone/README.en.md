@@ -6,6 +6,20 @@ Experimental standalone edition for Windows 11 and Linux.
 
 This edition removes the Docker watcher and PowerShell/bash wrapper dependency. It uses a direct Python CLI so future desktop, web, or native UI layers can call the same pipeline code.
 
+For model and third-party distribution notices, see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+
+## Easiest Windows Flow
+
+If command lines feel intimidating, use the two Windows helper files first:
+
+1. Double-click `install-windows.bat`.
+2. After setup finishes, double-click `run-kotoba.bat`.
+3. Pick a video file or folder in the small launcher window, then press `시작`.
+
+`run-kotoba.bat` starts `kotoba-launcher`. The launcher lets you choose the input, output folder, auto silence threshold, Korean translation, and Ollama translation model from a simple window.
+
+The command-line flow below is still useful for troubleshooting.
+
 ## Quick Setup
 
 Install `uv`, then run from this folder:
@@ -21,6 +35,12 @@ For transcription on NVIDIA CUDA:
 ```powershell
 uv sync --group transcribe --group cuda
 uv run --group transcribe --group cuda kotoba process "..\sample\ja_short_test.mp4" --output-dir ".\tmp-output" --auto-silence-threshold
+```
+
+To open the launcher from a terminal:
+
+```powershell
+uv run --group transcribe --group cuda kotoba-launcher
 ```
 
 ## Processing
@@ -97,4 +117,3 @@ On the current test machine, 30B Q4 produced the best Korean, and 7B Q4 was a us
 ```powershell
 uv run --group dev pytest
 ```
-

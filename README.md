@@ -6,6 +6,8 @@
 
 - [standalone 한국어 설치/사용 안내](standalone/README.md)
 - [standalone English guide](standalone/README.en.md)
+- Windows 초보자용 standalone 실행: `standalone\install-windows.bat` 실행 후 `standalone\run-kotoba.bat`
+- 배포/라이선스 고지: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 Windows 또는 Linux + Docker 환경에서 `input` 폴더에 넣은 영상/음성 파일을 `kotoba-tech/kotoba-whisper-v2.2`로 일본어 전사하고 SRT/TXT/JSON 결과를 생성하는 폴더 감시형 CLI입니다.
 

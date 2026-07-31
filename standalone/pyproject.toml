@@ -40,6 +40,7 @@ torchaudio = { index = "pytorch-cu121" }
 
 [project.scripts]
 kotoba = "kotoba_standalone.cli:main"
+kotoba-launcher = "kotoba_standalone.launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

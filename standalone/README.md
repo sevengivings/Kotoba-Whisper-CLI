@@ -6,6 +6,20 @@
 
 standalone 버전은 동영상 파일을 직접 지정해서 일본어 자막을 만들고, 필요하면 Ollama로 한국어 자막까지 번역합니다. `ffmpeg`는 따로 설치하지 않아도 됩니다.
 
+모델과 주요 라이브러리의 배포/라이선스 고지는 루트의 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)를 참고하세요.
+
+## 가장 쉬운 실행 방법
+
+PowerShell 명령어가 부담스럽다면 아래 두 파일부터 사용하세요.
+
+1. `install-windows.bat`를 더블클릭합니다.
+2. 설치가 끝나면 `run-kotoba.bat`를 더블클릭합니다.
+3. 작은 창이 뜨면 영상 파일이나 폴더를 선택하고 `시작`을 누릅니다.
+
+`run-kotoba.bat`는 내부적으로 `kotoba-launcher`를 실행합니다. 런처에서는 입력 파일/폴더, 결과 폴더, 자동 무음 기준, 한국어 번역 여부, Ollama 번역 모델을 화면에서 고를 수 있습니다.
+
+명령어를 직접 쓰는 방법은 아래에 계속 정리해 두었습니다. 문제가 생겼을 때는 명령어 방식이 원인 파악에 더 편합니다.
+
 ## 무엇을 설치하나요?
 
 필요한 것은 네 가지입니다.
@@ -65,6 +79,12 @@ uv sync --group transcribe --group cuda
 
 ```powershell
 uv run --group transcribe --group cuda kotoba --help
+```
+
+GUI 런처를 열려면:
+
+```powershell
+uv run --group transcribe --group cuda kotoba-launcher
 ```
 
 ## 5. 짧은 샘플로 자막 추출 테스트
@@ -229,4 +249,3 @@ uv run kotoba translate ".\tmp-output\sample.ja.srt" --model hf.co/mradermacher/
 ```powershell
 uv run --group dev pytest
 ```
-
