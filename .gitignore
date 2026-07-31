@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 *.egg-info/
 /standalone/tmp-output/
+/standalone/tmp-transcribe/
+/standalone/config/translation-defaults.json
 /input/*
 /processing/*
 /output/*

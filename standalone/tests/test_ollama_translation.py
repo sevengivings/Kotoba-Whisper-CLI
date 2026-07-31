@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+import urllib.error
 from pathlib import Path
 
-from kotoba_standalone.translate.ollama import build_system_prompt, default_output_srt, make_batches, parse_batch_translation
+import pytest
+
+from kotoba_standalone.translate.ollama import (
+    OllamaModelError,
+    OllamaUnavailableError,
+    assert_ollama_model_available,
+    build_system_prompt,
+    check_ollama_available,
+    default_output_srt,
+    get_ollama_models,
+    make_batches,
+    parse_batch_translation,
+)
+from kotoba_standalone.types import TranslationOptions
 
 
 def test_default_output_srt_replaces_ja_suffix() -> None:
@@ -32,3 +46,35 @@ def test_korean_prompt_can_request_strict_informal_style() -> None:
     assert "strict informal Korean speech style" in prompt
     assert "Translate each line separately" in prompt
 
+
+def test_check_ollama_available_reports_unreachable_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing_urlopen(*args: object, **kwargs: object) -> object:
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", failing_urlopen)
+
+    with pytest.raises(OllamaUnavailableError, match="Ollama is not reachable"):
+        check_ollama_available(TranslationOptions(model="test"))
+
+
+def test_get_ollama_models_parses_tags_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"models":[{"name":"a:model"},{"name":"b:model"}]}'
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: FakeResponse())
+
+    assert get_ollama_models(TranslationOptions(model="a:model")) == ["a:model", "b:model"]
+
+
+def test_assert_ollama_model_available_reports_missing_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("kotoba_standalone.translate.ollama.get_ollama_models", lambda options: ["a:model"])
+
+    with pytest.raises(OllamaModelError, match="was not found"):
+        assert_ollama_model_available(TranslationOptions(model="missing:model"))

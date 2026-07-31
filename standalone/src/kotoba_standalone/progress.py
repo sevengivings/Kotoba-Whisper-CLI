@@ -34,8 +34,11 @@ def tqdm_progress() -> Iterator[ProgressCallback]:
         current = event.current or 0
         if bar is None:
             bar = tqdm(total=total, desc=event.message, unit="step", leave=False, file=sys.stdout)
-        if bar.total != total:
+        if bar.total != total and (current <= 1 or current < bar.n):
+            bar.reset(total=total)
+        elif bar.total != total:
             bar.total = total
+            bar.refresh()
         bar.set_description(event.message)
         delta = max(0, current - bar.n)
         if delta:

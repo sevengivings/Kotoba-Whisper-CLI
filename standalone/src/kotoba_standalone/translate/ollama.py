@@ -50,6 +50,14 @@ KOREAN_STRICT_BANMAL_STYLE_PROMPT = (
 )
 
 
+class OllamaUnavailableError(RuntimeError):
+    pass
+
+
+class OllamaModelError(RuntimeError):
+    pass
+
+
 def translate_srt(
     input_srt: Path,
     options: TranslationOptions,
@@ -60,6 +68,7 @@ def translate_srt(
     if not input_srt.exists():
         raise FileNotFoundError(input_srt)
 
+    assert_ollama_model_available(options)
     output_srt = options.output or default_output_srt(input_srt)
     entries = parse_srt(input_srt)
     translated_texts = translate_entries(
@@ -92,6 +101,38 @@ def translate_srt(
     metadata_path = output_srt.with_suffix(".translation.json")
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     return TranslationResult(input_srt, output_srt, metadata_path, len(entries), processing_seconds)
+
+
+def check_ollama_available(options: TranslationOptions) -> None:
+    get_ollama_models(options)
+
+
+def get_ollama_models(options: TranslationOptions) -> list[str]:
+    url = f"http://{options.ollama_host}:{options.ollama_port}/api/tags"
+    request = urllib.request.Request(url, method="GET")
+    timeout = min(5, max(1, options.timeout_seconds))
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        raise OllamaUnavailableError(
+            f"Ollama is not reachable at {url}. Start Ollama first, then retry."
+        ) from exc
+    models = [str(item.get("name", "")).strip() for item in data.get("models", []) if isinstance(item, dict)]
+    models = [model for model in models if model]
+    if not models:
+        raise OllamaModelError(f"No Ollama models found at {url}. Run 'ollama pull <model>' first, then retry.")
+    return models
+
+
+def assert_ollama_model_available(options: TranslationOptions) -> None:
+    models = get_ollama_models(options)
+    if options.model not in models:
+        available = ", ".join(models)
+        raise OllamaModelError(
+            f"Ollama model '{options.model}' was not found at http://{options.ollama_host}:{options.ollama_port}. "
+            f"Available models: {available}."
+        )
 
 
 def default_output_srt(input_srt: Path) -> Path:
@@ -293,4 +334,3 @@ def _emit(
             elapsed_seconds=time.time() - started,
         )
     )
-
