@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterator
 
 import kotoba_standalone.cli as cli
+from kotoba_standalone.media import FFmpegAudioExtractionError
 from kotoba_standalone.translate.ollama import OllamaUnavailableError
 from kotoba_standalone.types import ProcessResult, TranslationResult
 
@@ -140,6 +141,25 @@ def test_process_file_returns_failure_for_vad_error(tmp_path: Path, monkeypatch,
     assert exit_code == 1
     assert "Finished with status: vad_error" in captured.out
     assert "Hugging Face access is required" in captured.out
+
+
+def test_process_file_reports_ffmpeg_audio_error_without_traceback(tmp_path: Path, monkeypatch, capsys) -> None:
+    media_path = tmp_path / "broken.mp4"
+    media_path.write_text("", encoding="utf-8")
+
+    def fake_process_video(*args: object, **kwargs: object) -> ProcessResult:
+        raise FFmpegAudioExtractionError("FFmpeg could not extract audio\nSet KOTOBA_FFMPEG_PATH")
+
+    monkeypatch.setattr(cli, "process_video", fake_process_video)
+    monkeypatch.setattr(cli, "tqdm_progress", null_progress)
+
+    exit_code = cli.main(["process", str(media_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Failed." in captured.out
+    assert "KOTOBA_FFMPEG_PATH" in captured.out
+    assert "Traceback" not in captured.out
 
 
 def test_resolve_translation_model_uses_saved_model(monkeypatch) -> None:

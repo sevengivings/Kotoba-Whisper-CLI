@@ -178,6 +178,24 @@ After translation succeeds, the selected or requested model is saved to `config/
 
 When `kotoba process --translate` succeeds, the Korean subtitle is also copied next to the original media file. If `VideoName.srt` does not exist, it uses that name. If it already exists, it writes `VideoName.ko.srt` instead.
 
+## Troubleshooting
+
+### FFmpeg Audio Extraction Fails
+
+FFmpeg normally does not need to be installed separately. Some damaged AAC streams, however, can fail with the bundled FFmpeg while a different external FFmpeg build can finish.
+
+Download FFmpeg from [ffmpeg.org/download.html](https://ffmpeg.org/download.html), add the folder containing `ffmpeg.exe` to PATH, then reopen PowerShell and check:
+
+```powershell
+ffmpeg -version
+```
+
+If you prefer to pin a specific FFmpeg executable, edit `run-kotoba.bat` and remove `REM ` from this example line:
+
+```bat
+REM set KOTOBA_FFMPEG_PATH=C:\Python\Faster-Whisper-XXL\ffmpeg.exe
+```
+
 ## Model Smoke Test
 
 Before translating a long SRT:

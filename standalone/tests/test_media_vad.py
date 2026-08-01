@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+import kotoba_standalone.media as media
 from kotoba_standalone.media import (
+    FFmpegAudioExtractionError,
     SilenceSpan,
+    extract_audio,
     normalize_speech_spans,
     parse_silencedetect_output,
     speech_spans_from_silences,
@@ -54,3 +61,55 @@ def test_normalize_speech_spans_filters_pads_merges_and_splits() -> None:
         SilenceSpan(0.8, 2.8),
         SilenceSpan(2.8, 4.2),
     ]
+
+
+def test_ffmpeg_exe_prefers_configured_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    configured = tmp_path / "custom-ffmpeg.exe"
+    configured.write_text("", encoding="utf-8")
+    monkeypatch.setenv(media.FFMPEG_PATH_ENV, str(configured))
+    monkeypatch.setattr(media.shutil, "which", lambda name: None)
+
+    assert media.ffmpeg_exe() == str(configured)
+
+
+def test_ffmpeg_exe_rejects_missing_configured_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(media.FFMPEG_PATH_ENV, r"C:\missing\ffmpeg.exe")
+
+    with pytest.raises(FileNotFoundError):
+        media.ffmpeg_exe()
+
+
+def test_ffmpeg_exe_prefers_path_before_bundled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(media.FFMPEG_PATH_ENV, raising=False)
+    monkeypatch.setattr(media.shutil, "which", lambda name: r"C:\tools\ffmpeg.exe" if name == "ffmpeg" else None)
+    monkeypatch.setattr(media.imageio_ffmpeg, "get_ffmpeg_exe", lambda: r"C:\bundled\ffmpeg.exe")
+
+    assert media.ffmpeg_exe() == r"C:\tools\ffmpeg.exe"
+
+
+def test_ffprobe_exe_uses_path_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(media.shutil, "which", lambda name: r"C:\tools\ffprobe.exe" if name == "ffprobe" else None)
+
+    assert media.ffprobe_exe() == r"C:\tools\ffprobe.exe"
+
+
+def test_extract_audio_error_suggests_external_ffmpeg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    input_file = tmp_path / "broken.mp4"
+    wav_path = tmp_path / "broken.wav"
+    input_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr(media, "ffmpeg_exe", lambda: r"C:\venv\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg.exe")
+
+    class Result:
+        returncode = 1
+        stderr = "aac bitstream error\nInvalid data found when processing input"
+
+    monkeypatch.setattr(media, "_run_media_command", lambda command: Result())
+
+    with pytest.raises(FFmpegAudioExtractionError) as exc_info:
+        extract_audio(input_file, wav_path)
+
+    message = str(exc_info.value)
+    assert "bundled FFmpeg failed" in message
+    assert media.FFMPEG_PATH_ENV in message
+    assert "한국어 안내" in message
+    assert "Invalid data found" in message

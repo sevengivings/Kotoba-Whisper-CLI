@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kotoba_standalone.media import ffmpeg_exe
 from kotoba_standalone.subtitle import SubtitleChunk, clean_text
 
 
@@ -177,11 +178,7 @@ def write_alignment_metadata(path: Path, metadata: dict[str, Any]) -> None:
 
 
 def _ensure_ffmpeg_on_path() -> None:
-    try:
-        import imageio_ffmpeg
-    except ImportError:
-        return
-    ffmpeg_path = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
+    ffmpeg_path = Path(ffmpeg_exe()).resolve()
     ffmpeg_dir = str(ffmpeg_path.parent)
     path = os.environ.get("PATH", "")
     if ffmpeg_dir.lower() not in [part.lower() for part in path.split(os.pathsep) if part]:
@@ -190,14 +187,13 @@ def _ensure_ffmpeg_on_path() -> None:
 
 def _load_audio(path: Path, sample_rate: int) -> Any:
     try:
-        import imageio_ffmpeg
         import numpy as np
     except ImportError:
         _ensure_ffmpeg_on_path()
         import whisperx  # type: ignore[import-not-found]
 
         return whisperx.load_audio(str(path))
-    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg = ffmpeg_exe()
     command = [
         ffmpeg,
         "-nostdin",

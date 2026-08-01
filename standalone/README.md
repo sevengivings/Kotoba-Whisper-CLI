@@ -327,6 +327,24 @@ Ollama 앱을 실행한 뒤 다시 시도하세요. 확인 명령은 다음과 �
 ollama list
 ```
 
+### FFmpeg 오디오 추출에 실패합니다
+
+기본 사용에서는 FFmpeg를 따로 설치하지 않아도 됩니다. 다만 일부 MP4/MKV 파일은 AAC 오디오 스트림에 손상된 패킷이 있어 번들 FFmpeg가 중간에 멈출 수 있습니다. 이때는 외부 FFmpeg를 설치해 사용하면 처리되는 경우가 있습니다.
+
+1. [FFmpeg 다운로드 페이지](https://ffmpeg.org/download.html)에서 Windows용 FFmpeg를 내려받습니다.
+2. 압축을 풀고 `ffmpeg.exe`가 들어 있는 `bin` 폴더를 Windows PATH에 추가합니다.
+3. PowerShell을 새로 열고 아래 명령으로 확인합니다.
+
+```powershell
+ffmpeg -version
+```
+
+PATH 설정이 어렵거나 특정 FFmpeg만 쓰고 싶다면 `run-kotoba.bat`의 아래 예시 줄에서 `REM `을 지우고 실제 경로로 바꾸세요.
+
+```bat
+REM set KOTOBA_FFMPEG_PATH=C:\Python\Faster-Whisper-XXL\ffmpeg.exe
+```
+
 ### 모델이 너무 느리거나 로딩에 실패합니다
 
 30B 모델 대신 7B 모델을 사용하세요.

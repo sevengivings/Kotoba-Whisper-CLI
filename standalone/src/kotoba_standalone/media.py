@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+import shutil
 import subprocess
 import wave
 from array import array
@@ -15,6 +17,11 @@ import imageio_ffmpeg
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".m2ts"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".opus", ".wma"}
 SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
+FFMPEG_PATH_ENV = "KOTOBA_FFMPEG_PATH"
+
+
+class FFmpegAudioExtractionError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -36,10 +43,25 @@ def is_supported_media(path: Path) -> bool:
 
 
 def ffmpeg_exe() -> str:
+    configured = os.environ.get(FFMPEG_PATH_ENV)
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if configured_path.exists():
+            return str(configured_path)
+        raise FileNotFoundError(f"{FFMPEG_PATH_ENV} points to a missing ffmpeg executable: {configured}")
+
+    path_ffmpeg = shutil.which("ffmpeg")
+    if path_ffmpeg:
+        return path_ffmpeg
+
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
 def ffprobe_exe() -> str | None:
+    path_probe = shutil.which("ffprobe")
+    if path_probe:
+        return path_probe
+
     ffmpeg_path = Path(ffmpeg_exe())
     candidate = ffmpeg_path.with_name("ffprobe.exe" if ffmpeg_path.suffix.lower() == ".exe" else "ffprobe")
     if candidate.exists():
@@ -49,8 +71,12 @@ def ffprobe_exe() -> str | None:
 
 def extract_audio(input_file: Path, wav_path: Path) -> None:
     wav_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        ffmpeg = ffmpeg_exe()
+    except FileNotFoundError as exc:
+        raise FFmpegAudioExtractionError(_format_audio_extraction_error(input_file, str(exc), None)) from exc
     command = [
-        ffmpeg_exe(),
+        ffmpeg,
         "-hide_banner",
         "-loglevel",
         "error",
@@ -71,7 +97,7 @@ def extract_audio(input_file: Path, wav_path: Path) -> None:
     result = _run_media_command(command)
     if result.returncode != 0:
         stderr = result.stderr.strip() or "ffmpeg failed without stderr"
-        raise RuntimeError(f"FFmpeg audio extraction failed for {input_file}: {stderr}")
+        raise FFmpegAudioExtractionError(_format_audio_extraction_error(input_file, stderr, ffmpeg))
 
 
 def extract_audio_segment(source_wav_path: Path, segment_wav_path: Path, start: float, end: float) -> None:
@@ -336,3 +362,43 @@ def _run_media_command(command: list[str]) -> subprocess.CompletedProcess[str]:
         errors="replace",
         check=False,
     )
+
+
+def _format_audio_extraction_error(input_file: Path, stderr: str, selected_ffmpeg: str | None) -> str:
+    details = _tail_lines(stderr, 14)
+    lines = [
+        f"FFmpeg could not extract audio from: {input_file}",
+    ]
+    if selected_ffmpeg:
+        lines.append(f"Selected FFmpeg: {selected_ffmpeg}")
+        if _is_imageio_ffmpeg(selected_ffmpeg):
+            lines.extend(
+                [
+                    "",
+                    "The bundled FFmpeg failed while decoding this file.",
+                    "This often happens with damaged AAC audio packets. Some external FFmpeg builds can skip those packets and finish.",
+                    f"Install FFmpeg and add it to PATH, or set {FFMPEG_PATH_ENV} to a known-good ffmpeg.exe path.",
+                    r"Example: set KOTOBA_FFMPEG_PATH=C:\Python\Faster-Whisper-XXL\ffmpeg.exe",
+                    "한국어 안내: FFmpeg를 설치해서 PATH에 추가하거나, 정상 작동하는 ffmpeg.exe 경로를 KOTOBA_FFMPEG_PATH로 지정해 주세요.",
+                    r"예시: set KOTOBA_FFMPEG_PATH=C:\Python\Faster-Whisper-XXL\ffmpeg.exe",
+                ]
+            )
+    else:
+        lines.extend(
+            [
+                "",
+                f"Set {FFMPEG_PATH_ENV} to an existing ffmpeg.exe path, or install FFmpeg and add it to PATH.",
+                f"한국어 안내: {FFMPEG_PATH_ENV}에 기존 ffmpeg.exe 경로를 지정하거나, FFmpeg를 설치해서 PATH에 추가해 주세요.",
+            ]
+        )
+    lines.extend(["", "FFmpeg output:", details])
+    return "\n".join(lines)
+
+
+def _is_imageio_ffmpeg(ffmpeg: str) -> bool:
+    return "imageio_ffmpeg" in ffmpeg.replace("\\", "/").lower()
+
+
+def _tail_lines(text: str, max_lines: int) -> str:
+    lines = [line for line in text.strip().splitlines() if line.strip()]
+    return "\n".join(lines[-max_lines:]) if lines else "ffmpeg failed without stderr"

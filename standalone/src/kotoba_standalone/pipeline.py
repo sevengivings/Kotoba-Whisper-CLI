@@ -74,7 +74,7 @@ def process_video(
     progress_total = 12 if options.translate and options.alignment_engine == "whisperx" else 11 if options.translate or options.alignment_engine == "whisperx" else 10
     _emit(progress, started, "prepare", "Preparing input", 1, progress_total)
     media_duration = probe_duration_seconds(input_path)
-    _emit(progress, started, "extract_audio", "Extracting audio with bundled ffmpeg", 2, progress_total)
+    _emit(progress, started, "extract_audio", "Extracting audio with ffmpeg", 2, progress_total)
     extract_audio(input_path, wav_path)
     audio_duration = wav_duration_seconds(wav_path)
     _emit(progress, started, "probe_audio", "Audio extracted", 3, progress_total)

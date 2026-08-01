@@ -8,7 +8,7 @@ from kotoba_standalone.alignment import (
     align_chunks_with_whisperx,
     write_alignment_metadata,
 )
-from kotoba_standalone.media import is_supported_media
+from kotoba_standalone.media import FFmpegAudioExtractionError, is_supported_media
 from kotoba_standalone.pipeline import process_video, validate_silence_threshold
 from kotoba_standalone.progress import tqdm_progress
 from kotoba_standalone.settings import DEFAULT_TRANSLATION_MODEL, load_saved_translation_model, save_translation_model
@@ -159,7 +159,7 @@ def run_process(args: argparse.Namespace) -> int:
                 if result.status != "success":
                     failed += 1
                 print_process_result(result)
-            except (OllamaModelError, OllamaUnavailableError, Exception) as exc:
+            except (FFmpegAudioExtractionError, OllamaModelError, OllamaUnavailableError, Exception) as exc:
                 failed += 1
                 print_error(f"Failed {media_file.name}: {exc}")
             else:
@@ -171,7 +171,7 @@ def run_process(args: argparse.Namespace) -> int:
     with tqdm_progress() as progress:
         try:
             result = process_video(input_path, options, progress=progress)
-        except (OllamaModelError, OllamaUnavailableError) as exc:
+        except (FFmpegAudioExtractionError, OllamaModelError, OllamaUnavailableError) as exc:
             print_error(str(exc))
             return 1
     print_process_result(result)
