@@ -11,6 +11,7 @@ from kotoba_standalone.translate.ollama import (
     assert_ollama_model_available,
     build_system_prompt,
     check_ollama_available,
+    clean_translated_subtitle_text,
     default_output_srt,
     get_ollama_models,
     make_batches,
@@ -46,6 +47,26 @@ def test_parse_batch_translation_maps_local_numbers_to_original_indices() -> Non
     parsed = parse_batch_translation(result, [10, 11])
 
     assert parsed == {10: "안녕하세요", 11: "괜찮아요"}
+
+
+def test_parse_batch_translation_removes_nested_number_labels() -> None:
+    result = "1. [1] 안녕하세요\n2. [2] 괜찮아요"
+
+    parsed = parse_batch_translation(result, [10, 11])
+
+    assert parsed == {10: "안녕하세요", 11: "괜찮아요"}
+
+
+def test_parse_batch_translation_splits_inline_numbered_lines() -> None:
+    result = "[1] 안녕하세요 [2] 괜찮아요"
+
+    parsed = parse_batch_translation(result, [10, 11])
+
+    assert parsed == {10: "안녕하세요", 11: "괜찮아요"}
+
+
+def test_clean_translated_subtitle_text_removes_leading_batch_labels() -> None:
+    assert clean_translated_subtitle_text("[41] 이건 뭐예요?") == "이건 뭐예요?"
 
 
 def test_korean_prompt_can_request_strict_informal_style() -> None:

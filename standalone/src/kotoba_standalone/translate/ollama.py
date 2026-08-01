@@ -274,7 +274,7 @@ def parse_batch_translation(result: str, batch: list[int]) -> dict[int, str]:
     local_to_original = {local_no: original_index for local_no, original_index in enumerate(batch, 1)}
     parsed: dict[int, str] = {}
     current_original_index = -1
-    for line in result.splitlines():
+    for line in _iter_batch_translation_lines(result):
         line = line.strip()
         if not line:
             continue
@@ -287,10 +287,25 @@ def parse_batch_translation(result: str, batch: list[int]) -> dict[int, str]:
                 current_original_index = -1
                 continue
             current_original_index = local_to_original[local_no]
-            parsed[current_original_index] = match.group(2).strip()
+            parsed[current_original_index] = clean_translated_subtitle_text(match.group(2))
         elif current_original_index != -1:
-            parsed[current_original_index] = f"{parsed[current_original_index]} {line}".strip()
+            parsed[current_original_index] = clean_translated_subtitle_text(
+                f"{parsed[current_original_index]} {line}".strip()
+            )
     return parsed
+
+
+def _iter_batch_translation_lines(result: str) -> list[str]:
+    lines: list[str] = []
+    for raw_line in result.strip().splitlines():
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        if re.match(r"^\d+[\.\)]\s+\[\d+\]\s+", raw_line):
+            lines.append(raw_line)
+        else:
+            lines.extend(re.split(r"\s+(?=\[\d+\]\s+)", raw_line))
+    return lines
 
 
 def validate_translations(translated_texts: list[str]) -> None:
@@ -303,8 +318,17 @@ def write_srt(path: Path, entries: list[dict[str, str]], translated_texts: list[
     path.parent.mkdir(parents=True, exist_ok=True)
     blocks = []
     for index, (entry, translated_text) in enumerate(zip(entries, translated_texts), 1):
-        blocks.append(f"{index}\n{entry['timecode']}\n{translated_text.strip()}")
+        blocks.append(f"{index}\n{entry['timecode']}\n{clean_translated_subtitle_text(translated_text)}")
     path.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
+
+
+def clean_translated_subtitle_text(text: str) -> str:
+    cleaned = text.strip()
+    while True:
+        next_cleaned = re.sub(r"^\[\d{1,4}\]\s*", "", cleaned).strip()
+        if next_cleaned == cleaned:
+            return cleaned
+        cleaned = next_cleaned
 
 
 def validate_srt(path: Path, expected_count: int) -> None:
