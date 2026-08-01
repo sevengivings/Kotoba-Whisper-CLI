@@ -13,10 +13,14 @@ from kotoba_standalone.translate.ollama import (
     check_ollama_available,
     clean_translated_subtitle_text,
     default_output_srt,
+    format_ollama_model_choice,
     get_ollama_models,
+    is_likely_translation_model,
     make_batches,
     parse_batch_translation,
     resolve_output_srt,
+    sort_ollama_models_for_translation,
+    translation_model_label,
 )
 from kotoba_standalone.types import TranslationOptions
 
@@ -39,6 +43,25 @@ def test_make_batches_defaults_to_subtitle_count() -> None:
 
     assert [len(batch) for batch in batches] == [50, 50, 20]
     assert batches[-1][-1] == 119
+
+
+def test_sort_ollama_models_prioritizes_likely_translation_models() -> None:
+    models = [
+        "qwen3:14b",
+        "hf.co/mradermacher/Hy-MT2-1.8B-GGUF:Q4_K_M",
+        "hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M",
+        "glm-4.7-flash:latest",
+    ]
+
+    sorted_models = sort_ollama_models_for_translation(models)
+
+    assert sorted_models[0] == "hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M"
+    assert sorted_models[1] == "hf.co/mradermacher/Hy-MT2-1.8B-GGUF:Q4_K_M"
+    assert is_likely_translation_model("hf.co/mradermacher/translategemma-12b-it-GGUF:Q8_0")
+    assert not is_likely_translation_model("hf.co/mradermacher/Hy-MT2-1.8B-GGUF:Q4_K_M")
+    assert not is_likely_translation_model("qwen3:14b")
+    assert translation_model_label("hf.co/mradermacher/Hy-MT2-1.8B-GGUF:Q4_K_M") == "실험용/비추천"
+    assert format_ollama_model_choice("qwen3:14b").startswith("[번역 미확인]")
 
 
 def test_parse_batch_translation_maps_local_numbers_to_original_indices() -> None:

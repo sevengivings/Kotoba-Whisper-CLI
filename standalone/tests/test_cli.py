@@ -176,8 +176,8 @@ def test_choose_ollama_model_selects_by_number(monkeypatch, capsys) -> None:
 
     captured = capsys.readouterr()
     assert selected == "second:model"
-    assert "[1] first:model" in captured.out
-    assert "[2] second:model" in captured.out
+    assert "[번역 미확인] first:model" in captured.out
+    assert "[번역 미확인] second:model" in captured.out
 
 
 def test_translate_saves_successful_model(tmp_path: Path, monkeypatch) -> None:

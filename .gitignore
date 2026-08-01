@@ -7,6 +7,7 @@ __pycache__/
 /standalone/tmp-transcribe*/
 /standalone/build/
 /standalone/config/translation-defaults.json
+/standalone/config/launcher-state.json
 /docker/input/*
 /docker/processing/*
 /docker/output/*

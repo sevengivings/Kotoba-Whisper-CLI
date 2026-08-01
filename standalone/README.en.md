@@ -16,7 +16,7 @@ If command lines feel intimidating, use the two Windows helper files first:
 2. After setup finishes, double-click `run-kotoba.bat`.
 3. Pick a video file or folder in the small launcher window, then press `시작`.
 
-`run-kotoba.bat` starts `kotoba-launcher`. The launcher lets you choose the input, output folder, Korean translation, and Ollama translation model from a simple window. Speech detection automatically uses the bundled pyannote model. Experimental subtitle quality post-processing remains CLI-only.
+`run-kotoba.bat` starts `kotoba-launcher`. The launcher lets you choose the input, work folder, Korean translation, and Ollama translation model from a simple window. Speech detection automatically uses the bundled pyannote model. Experimental subtitle quality post-processing remains CLI-only.
 
 The command-line flow below is still useful for troubleshooting.
 
@@ -57,7 +57,7 @@ Process all supported media files directly inside one folder:
 uv run --no-sync kotoba process "D:\Videos" --output-dir ".\tmp-output"
 ```
 
-Pyannote VAD pre-split is enabled by default. It detects human speech spans, transcribes them, and offsets timestamps back onto the original media timeline. The GUI does not expose the legacy FFmpeg volume controls. Advanced CLI users can compare the old engine with `--vad-engine ffmpeg` and optionally add `--auto-silence-threshold` or `--silence-threshold-db -42dB`.
+Pyannote VAD pre-split is enabled by default. It detects human speech spans, transcribes them, and offsets timestamps back onto the original media timeline. The GUI does not expose the legacy FFmpeg volume controls, but its status panel can pin an external FFmpeg executable for damaged audio streams. Advanced CLI users can compare the old engine with `--vad-engine ffmpeg` and optionally add `--auto-silence-threshold` or `--silence-threshold-db -42dB`.
 
 ### Default pyannote VAD
 

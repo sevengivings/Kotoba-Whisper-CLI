@@ -19,6 +19,15 @@ OLLAMA_OPTIONS = {
     "num_ctx": 8192,
 }
 
+RECOMMENDED_TRANSLATION_MODEL_KEYWORDS = (
+    "hy-mt2-30b",
+    "hy-mt2-7b",
+    "translategemma",
+)
+DISCOURAGED_TRANSLATION_MODEL_KEYWORDS = (
+    "hy-mt2-1.8b",
+)
+
 SUBTITLE_STYLE_PROMPT = (
     "Many subtitles are short everyday Japanese, casual reactions, interjections, or adult video dialogue. "
     "Translate them into natural Korean spoken subtitle style. "
@@ -123,6 +132,28 @@ def get_ollama_models(options: TranslationOptions) -> list[str]:
     if not models:
         raise OllamaModelError(f"No Ollama models found at {url}. Run 'ollama pull <model>' first, then retry.")
     return models
+
+
+def is_likely_translation_model(model: str) -> bool:
+    return translation_model_label(model) == "번역 추천"
+
+
+def translation_model_label(model: str) -> str:
+    normalized = model.strip().lower()
+    if any(keyword in normalized for keyword in DISCOURAGED_TRANSLATION_MODEL_KEYWORDS):
+        return "실험용/비추천"
+    if any(keyword in normalized for keyword in RECOMMENDED_TRANSLATION_MODEL_KEYWORDS):
+        return "번역 추천"
+    return "번역 미확인"
+
+
+def sort_ollama_models_for_translation(models: list[str]) -> list[str]:
+    rank = {"번역 추천": 0, "실험용/비추천": 1, "번역 미확인": 2}
+    return sorted(models, key=lambda model: (rank[translation_model_label(model)], model.lower()))
+
+
+def format_ollama_model_choice(model: str) -> str:
+    return f"[{translation_model_label(model)}] {model}"
 
 
 def assert_ollama_model_available(options: TranslationOptions) -> None:

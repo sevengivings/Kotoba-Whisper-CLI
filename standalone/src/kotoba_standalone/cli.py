@@ -13,7 +13,14 @@ from kotoba_standalone.pipeline import process_video, validate_silence_threshold
 from kotoba_standalone.progress import tqdm_progress
 from kotoba_standalone.settings import DEFAULT_TRANSLATION_MODEL, load_saved_translation_model, save_translation_model
 from kotoba_standalone.subtitle import chunks_to_srt, parse_srt_chunks
-from kotoba_standalone.translate.ollama import OllamaModelError, OllamaUnavailableError, get_ollama_models, translate_srt
+from kotoba_standalone.translate.ollama import (
+    OllamaModelError,
+    OllamaUnavailableError,
+    format_ollama_model_choice,
+    get_ollama_models,
+    sort_ollama_models_for_translation,
+    translate_srt,
+)
 from kotoba_standalone.types import ProcessOptions, ProcessResult, ProgressEvent, TranslationOptions
 
 
@@ -301,10 +308,10 @@ def choose_ollama_model(ollama_host: str, ollama_port: int, timeout_seconds: int
         ollama_port=ollama_port,
         timeout_seconds=timeout_seconds,
     )
-    models = get_ollama_models(options)
+    models = sort_ollama_models_for_translation(get_ollama_models(options))
     print("Available Ollama models:")
     for index, model in enumerate(models, 1):
-        print(f"  [{index}] {model}")
+        print(f"  [{index}] {format_ollama_model_choice(model)}")
     choice = input("Choose translation model number: ").strip()
     if not choice.isdigit():
         raise OllamaModelError(f"Invalid model choice: {choice}")

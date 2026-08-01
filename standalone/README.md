@@ -16,7 +16,7 @@ PowerShell 명령어가 부담스럽다면 아래 두 파일부터 사용하세�
 2. 설치가 끝나면 `run-kotoba.bat`를 더블클릭합니다.
 3. 작은 창이 뜨면 영상 파일이나 폴더를 선택하고 `시작`을 누릅니다.
 
-`run-kotoba.bat`는 내부적으로 `kotoba-launcher`를 실행합니다. 런처에서는 입력 파일/폴더, 결과 폴더, 한국어 번역 여부와 Ollama 번역 모델을 화면에서 고를 수 있습니다. 음성 구간 검출은 번들된 pyannote를 자동으로 사용합니다. 실험적인 자막 품질 후처리는 CLI에서만 사용할 수 있습니다.
+`run-kotoba.bat`는 내부적으로 `kotoba-launcher`를 실행합니다. 런처에서는 입력 파일/폴더, 작업 폴더, 한국어 번역 여부와 Ollama 번역 모델을 화면에서 고를 수 있습니다. 음성 구간 검출은 번들된 pyannote를 자동으로 사용합니다. 실험적인 자막 품질 후처리는 CLI에서만 사용할 수 있습니다.
 
 명령어를 직접 쓰는 방법은 아래에 계속 정리해 두었습니다. 문제가 생겼을 때는 명령어 방식이 원인 파악에 더 편합니다.
 
@@ -150,7 +150,7 @@ uv sync --group transcribe --group cuda --group pyannote
 uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output"
 ```
 
-GUI는 pyannote를 자동으로 사용하며 FFmpeg 관련 설정을 표시하지 않습니다. pyannote 실행이 끝나면 모델을 GPU 메모리에서 내린 뒤 Kotoba를 로드하므로 두 모델이 GPU에 계속 함께 남지는 않습니다.
+GUI는 pyannote를 자동으로 사용하며 기존 FFmpeg 음량 기반 VAD 조절값은 표시하지 않습니다. 다만 일부 손상된 오디오 스트림을 우회할 수 있도록 상태 영역에서 외부 FFmpeg 실행 파일을 지정할 수 있습니다. pyannote 실행이 끝나면 모델을 GPU 메모리에서 내린 뒤 Kotoba를 로드하므로 두 모델이 GPU에 계속 함께 남지는 않습니다.
 
 - `--vad-engine pyannote`: 기본값이며 `pyannote/segmentation-3.0`으로 사람 음성 구간을 검출합니다.
 - `--vad-engine ffmpeg`: 기존 음량 기반 VAD를 CLI에서 비교할 때만 사용합니다.

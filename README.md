@@ -44,7 +44,7 @@ ollama pull hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
 uv run --no-sync kotoba process "D:\Videos\sample.mp4" --translate --translation-model-choice
 ```
 
-번역이 성공하면 한국어 자막은 결과 폴더뿐 아니라 원본 영상 옆에도 복사됩니다.
+번역이 성공하면 한국어 자막은 작업 폴더뿐 아니라 원본 영상 옆에도 복사됩니다.
 
 ## 제공 버전
 
