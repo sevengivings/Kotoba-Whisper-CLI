@@ -29,6 +29,13 @@ def test_process_parser_defaults_to_pyannote(tmp_path: Path) -> None:
 
     assert args.vad_engine == "pyannote"
     assert args.auto_silence_threshold is False
+    assert args.alignment_engine == "none"
+
+
+def test_process_parser_accepts_whisperx_alignment(tmp_path: Path) -> None:
+    args = cli.build_parser().parse_args(["process", str(tmp_path / "a.mp4"), "--whisperx-align"])
+
+    assert args.alignment_engine == "whisperx"
 
 
 def test_process_directory_processes_each_media_file(tmp_path: Path, monkeypatch) -> None:
@@ -90,6 +97,7 @@ def test_process_file_prints_human_readable_summary(tmp_path: Path, monkeypatch,
             copied_ko_srt_path=tmp_path / "a.srt",
             status="success",
             message="ok",
+            ja_aligned_srt_path=tmp_path / "a.whisperx.ja.srt",
         )
 
     monkeypatch.setattr(cli, "process_video", fake_process_video)
@@ -101,6 +109,7 @@ def test_process_file_prints_human_readable_summary(tmp_path: Path, monkeypatch,
     assert exit_code == 0
     assert "Done." in captured.out
     assert "Japanese SRT:" in captured.out
+    assert "WhisperX Japanese SRT:" in captured.out
     assert "Korean SRT:" in captured.out
     assert "Copied Korean SRT:" in captured.out
     assert "{" not in captured.out

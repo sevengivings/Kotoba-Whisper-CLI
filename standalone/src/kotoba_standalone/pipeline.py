@@ -7,6 +7,11 @@ import shutil
 from typing import Any
 from pathlib import Path
 
+from kotoba_standalone.alignment import (
+    WhisperXAlignmentError,
+    align_chunks_with_whisperx,
+    write_alignment_metadata,
+)
 from kotoba_standalone.media import (
     detect_silences,
     estimate_silence_threshold,
@@ -62,9 +67,11 @@ def process_video(
     process_json_path = output_dir / f"{input_path.stem}.process.json"
     vad_json_path = output_dir / f"{input_path.stem}.vad.json"
     quality_json_path = output_dir / f"{input_path.stem}.subtitle-quality.json"
+    whisperx_srt_path = output_dir / f"{input_path.stem}.whisperx.ja.srt"
+    whisperx_json_path = output_dir / f"{input_path.stem}.whisperx-align.json"
     wav_path = output_dir / f"{input_path.stem}.standalone.wav"
 
-    progress_total = 11 if options.translate else 10
+    progress_total = 12 if options.translate and options.alignment_engine == "whisperx" else 11 if options.translate or options.alignment_engine == "whisperx" else 10
     _emit(progress, started, "prepare", "Preparing input", 1, progress_total)
     media_duration = probe_duration_seconds(input_path)
     _emit(progress, started, "extract_audio", "Extracting audio with bundled ffmpeg", 2, progress_total)
@@ -277,6 +284,36 @@ def process_video(
     srt_chunks = annotate_chunks_with_quality(chunks, quality_issues) if options.annotate_subtitle_quality else chunks
     ja_srt_path.write_text(chunks_to_srt(srt_chunks), encoding="utf-8")
     ja_txt_path.write_text(chunks_to_txt(chunks), encoding="utf-8")
+    ja_aligned_srt_path = None
+    whisperx_metadata = None
+    if options.alignment_engine == "whisperx":
+        _emit(progress, started, "whisperx_align", "Aligning subtitle timings with WhisperX", 9, progress_total)
+        try:
+            aligned = align_chunks_with_whisperx(
+                chunks,
+                wav_path,
+                language_code=_whisperx_language_code(options.language),
+                device=options.model_device,
+                model_name=options.whisperx_align_model,
+            )
+        except WhisperXAlignmentError as exc:
+            _emit(progress, started, "alignment_error", "WhisperX alignment failed", 1, 1)
+            return ProcessResult(
+                input_path=input_path,
+                output_dir=output_dir,
+                wav_path=wav_path,
+                ja_srt_path=ja_srt_path,
+                ko_srt_path=None,
+                copied_ko_srt_path=None,
+                status="alignment_error",
+                message=str(exc),
+            )
+        whisperx_srt_path.write_text(chunks_to_srt(aligned.chunks), encoding="utf-8")
+        write_alignment_metadata(whisperx_json_path, aligned.metadata)
+        ja_aligned_srt_path = whisperx_srt_path
+        whisperx_metadata = aligned.metadata
+    elif options.alignment_engine != "none":
+        raise ValueError(f"Unsupported alignment engine: {options.alignment_engine}")
     raw_json_path.write_text(json.dumps(raw_output, ensure_ascii=False, indent=2), encoding="utf-8")
     process_json_path.write_text(
         json.dumps(
@@ -321,6 +358,10 @@ def process_video(
                 "vad_pre_split": options.vad_pre_split,
                 "transcription_segment_count": segment_count,
                 "subtitle_count": len(chunks),
+                "alignment_engine": options.alignment_engine,
+                "whisperx_aligned_srt": str(ja_aligned_srt_path) if ja_aligned_srt_path is not None else None,
+                "whisperx_alignment_report": str(whisperx_json_path) if whisperx_metadata is not None else None,
+                "whisperx_changed_subtitle_count": whisperx_metadata.get("changed_count") if whisperx_metadata else None,
                 "subtitle_quality_report": str(quality_json_path)
                 if (
                     options.report_subtitle_quality
@@ -361,6 +402,8 @@ def process_video(
         message = f"{message}; Korean translation completed: {ko_srt_path}"
     if copied_ko_srt_path is not None:
         message = f"{message}; copied Korean subtitle to: {copied_ko_srt_path}"
+    if ja_aligned_srt_path is not None:
+        message = f"{message}; WhisperX aligned Japanese subtitle: {ja_aligned_srt_path}"
     _emit(progress, started, "done", "Standalone transcription completed", progress_total, progress_total)
     return ProcessResult(
         input_path=input_path,
@@ -371,6 +414,7 @@ def process_video(
         copied_ko_srt_path=copied_ko_srt_path,
         status="success",
         message=message,
+        ja_aligned_srt_path=ja_aligned_srt_path,
     )
 
 
@@ -474,6 +518,21 @@ def _spans_to_json(spans: list[Any]) -> list[dict[str, float]]:
         }
         for span in spans
     ]
+
+
+def _whisperx_language_code(language: str) -> str:
+    normalized = language.strip().lower()
+    return {
+        "ja": "ja",
+        "japanese": "ja",
+        "jp": "ja",
+        "ko": "ko",
+        "korean": "ko",
+        "en": "en",
+        "english": "en",
+        "zh": "zh",
+        "chinese": "zh",
+    }.get(normalized, normalized)
 
 
 def validate_silence_threshold(value: str) -> str:

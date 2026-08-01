@@ -74,7 +74,8 @@ def detect_speech_spans_pyannote(
     except ImportError as exc:
         raise PyannoteVadDependencyError(
             "pyannote VAD dependencies are not installed. Run "
-            "'uv sync --group transcribe --group cuda --group pyannote', then retry."
+            "'uv sync --group transcribe --group cuda --group pyannote', then retry. "
+            f"Import error: {exc}"
         ) from exc
 
     if device.startswith("cuda") and not torch.cuda.is_available():

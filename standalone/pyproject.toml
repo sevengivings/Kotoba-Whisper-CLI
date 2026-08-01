@@ -29,6 +29,8 @@ cuda = [
     "torchaudio==2.5.1",
 ]
 pyannote = [
+    "numpy>=2.0,<2.4",
+    "pandas>=2.2,<3.0",
     "pyannote.audio==3.4.0",
     "speechbrain==1.0.3",
 ]

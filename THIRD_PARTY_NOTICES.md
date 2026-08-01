@@ -66,6 +66,22 @@ Apache 2.0 모델을 재배포하는 경우 일반적으로 다음을 지켜야 
 - 기본 번들 모델은 로컬에서 직접 로드하므로 최종 사용자의 Hugging Face 계정이나 토큰이 필요하지 않습니다.
 - 사용자가 `--pyannote-model`로 다른 원격 gated 모델을 지정하면 해당 모델의 접근 조건과 인증은 별도로 적용됩니다.
 
+### WhisperX alignment 실험
+
+- 사용 위치: standalone CLI의 선택적 자막 싱크 보정 실험
+- 프로젝트: <https://github.com/m-bain/whisperX>
+- PyPI 라이선스 표시: BSD-2-Clause
+- 현재 저장소에는 WhisperX 코드나 가중치를 포함하지 않습니다.
+- 최신 WhisperX는 현재 standalone의 Torch/pyannote 고정 버전과 의존성이 맞지 않을 수 있으므로, lock 파일에는 포함하지 않고 사용자가 실험 시 별도로 설치합니다.
+
+WhisperX가 일본어 alignment에 기본으로 내려받는 모델:
+
+- 모델 ID: `jonatasgrosman/wav2vec2-large-xlsr-53-japanese`
+- 출처: <https://huggingface.co/jonatasgrosman/wav2vec2-large-xlsr-53-japanese>
+- Hugging Face 표시 라이선스: Apache-2.0
+- 모델 크기: `model.safetensors` 약 1.27GB
+- 현재 저장소에는 이 alignment 모델 가중치를 포함하지 않습니다. 사용자가 `kotoba align` 또는 `--whisperx-align`을 실행할 때 Hugging Face 캐시에 직접 다운로드됩니다.
+
 ## 주요 런타임과 라이브러리
 
 아래 항목은 현재 Docker판 또는 standalone판에서 직접 사용하는 주요 구성요소입니다. 정확한 전체 목록은 `docker/requirements.txt`, `standalone/pyproject.toml`, `standalone/uv.lock`, Docker base image의 구성요소를 확인하세요.
@@ -82,6 +98,8 @@ Apache 2.0 모델을 재배포하는 경우 일반적으로 다음을 지켜야 
 | tqdm | 진행률 표시 | MPL-2.0 AND MIT |
 | imageio-ffmpeg | standalone ffmpeg 바이너리 확보 | BSD-2-Clause |
 | pyannote.audio 3.4.0 | standalone 및 Docker 기본 VAD | MIT |
+| WhisperX 3.4.5 | standalone CLI 선택적 alignment 실험 | BSD-2-Clause로 표시 |
+| NLTK | WhisperX 선택 설치 시 필요 | Apache 2.0 |
 | PyYAML | 설정 파일 처리 | MIT |
 | Docker base image `nvidia/cuda` | Docker판 CUDA 런타임 | NVIDIA CUDA 이미지 약관 확인 필요 |
 | ffmpeg | Docker판 오디오 추출, standalone은 imageio-ffmpeg 번들 사용 | 빌드 구성에 따라 LGPL/GPL 조건 확인 필요 |

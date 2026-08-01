@@ -15,12 +15,20 @@ from kotoba_standalone.translate.ollama import (
     get_ollama_models,
     make_batches,
     parse_batch_translation,
+    resolve_output_srt,
 )
 from kotoba_standalone.types import TranslationOptions
 
 
 def test_default_output_srt_replaces_ja_suffix() -> None:
     assert default_output_srt(Path("sample.ja.srt")) == Path("sample.ko.srt")
+
+
+def test_resolve_output_srt_accepts_output_directory(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+
+    assert resolve_output_srt(Path("sample.whisperx.ja.srt"), output_dir) == output_dir / "sample.whisperx.ko.srt"
 
 
 def test_make_batches_defaults_to_subtitle_count() -> None:

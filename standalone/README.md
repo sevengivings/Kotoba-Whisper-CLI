@@ -196,6 +196,31 @@ uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-outpu
 
 `--annotate-subtitle-quality`는 SRT 텍스트에 `[quality: ...]` 줄을 실제로 추가하므로 Subtitle Edit이나 동영상 플레이어에서 검토할 때만 사용하세요. 번역까지 함께 실행하면 태그도 번역 입력에 들어갈 수 있습니다.
 
+### WhisperX 싱크 보정 실험(CLI 전용)
+
+WhisperX alignment는 이미 만들어진 일본어 자막의 시작 시간을 오디오에 다시 맞춰 보는 실험 기능입니다. GUI에는 표시하지 않습니다.
+
+현재 standalone의 기본 Torch/pyannote 조합과 최신 WhisperX 의존성이 서로 맞지 않으므로, lock 파일에는 포함하지 않았습니다. 기존 standalone 환경에서 실험할 때만 다음처럼 최소 설치합니다.
+
+```powershell
+uv pip install --no-deps whisperx==3.4.5
+uv pip install "nltk>=3.9.1"
+```
+
+이미 만든 SRT와 WAV를 보정하려면:
+
+```powershell
+uv run --no-sync kotoba align "D:\Videos\sample.ja.srt" "D:\Videos\sample.standalone.wav" --output "D:\Videos\sample.whisperx.ja.srt"
+```
+
+전사 과정 뒤에 바로 보정본을 함께 만들려면:
+
+```powershell
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output" --whisperx-align
+```
+
+결과는 원본 `*.ja.srt`를 덮어쓰지 않고 `*.whisperx.ja.srt`와 `*.whisperx-align.json`으로 따로 저장합니다. 일본어 짧은 감탄사가 너무 짧아지는 문제를 피하기 위해 기본적으로 WhisperX의 시작 시간은 반영하되 기존 자막의 종료 시간은 보존하고, 최소 0.8초 표시 시간을 보장합니다.
+
 ## Ollama 설치
 
 한국어 번역을 하려면 Ollama가 필요합니다.
@@ -240,6 +265,8 @@ ollama pull hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
 ```powershell
 uv run kotoba translate ".\tmp-output\sample.ja.srt" --model hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
 ```
+
+`--output`에는 SRT 파일 경로 또는 결과 폴더를 지정할 수 있습니다. 폴더를 지정하면 원본 이름을 기준으로 `*.ko.srt` 파일을 그 안에 만듭니다.
 
 Ollama에 설치된 모델을 번호로 고르려면:
 

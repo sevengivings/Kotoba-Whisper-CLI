@@ -3,12 +3,18 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from kotoba_standalone.alignment import (
+    WhisperXAlignmentError,
+    align_chunks_with_whisperx,
+    write_alignment_metadata,
+)
 from kotoba_standalone.media import is_supported_media
 from kotoba_standalone.pipeline import process_video, validate_silence_threshold
 from kotoba_standalone.progress import tqdm_progress
 from kotoba_standalone.settings import DEFAULT_TRANSLATION_MODEL, load_saved_translation_model, save_translation_model
+from kotoba_standalone.subtitle import chunks_to_srt, parse_srt_chunks
 from kotoba_standalone.translate.ollama import OllamaModelError, OllamaUnavailableError, get_ollama_models, translate_srt
-from kotoba_standalone.types import ProcessOptions, ProcessResult, TranslationOptions
+from kotoba_standalone.types import ProcessOptions, ProcessResult, ProgressEvent, TranslationOptions
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -18,6 +24,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_process(args)
     if args.command == "translate":
         return run_translate(args)
+    if args.command == "align":
+        return run_align(args)
     parser.print_help()
     return 1
 
@@ -52,6 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
     process.add_argument("--annotate-subtitle-quality", action="store_true")
     process.add_argument("--tail-retranscribe-long-subtitles", action="store_true")
     process.add_argument("--tail-retranscribe-max-candidates", type=int, default=20)
+    process.add_argument("--whisperx-align", dest="alignment_engine", action="store_const", const="whisperx", default="none")
+    process.add_argument("--whisperx-align-model")
     process.add_argument("--translate", action="store_true")
     process.add_argument("--translation-model")
     process.add_argument("--translation-model-choice", action="store_true")
@@ -75,6 +85,14 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--text-split-size", type=int, default=0)
     translate.add_argument("--timeout-seconds", type=int, default=600)
     translate.add_argument("--korean-style", choices=("polite", "banmal", "strict-banmal"), default="polite")
+
+    align = subparsers.add_parser("align", help="Align an existing Japanese SRT with an existing WAV using WhisperX.")
+    align.add_argument("input_srt", type=Path)
+    align.add_argument("input_wav", type=Path)
+    align.add_argument("--output", type=Path)
+    align.add_argument("--language", default="japanese")
+    align.add_argument("--model-device", default="cuda:0")
+    align.add_argument("--whisperx-align-model")
     return parser
 
 
@@ -117,6 +135,8 @@ def run_process(args: argparse.Namespace) -> int:
         annotate_subtitle_quality=args.annotate_subtitle_quality,
         tail_retranscribe_long_subtitles=args.tail_retranscribe_long_subtitles,
         tail_retranscribe_max_candidates=args.tail_retranscribe_max_candidates,
+        alignment_engine=args.alignment_engine,
+        whisperx_align_model=args.whisperx_align_model,
         translate=args.translate,
         translation_model=translation_model,
         ollama_host=args.ollama_host,
@@ -202,6 +222,60 @@ def run_translate(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_align(args: argparse.Namespace) -> int:
+    input_srt = args.input_srt.expanduser().resolve()
+    input_wav = args.input_wav.expanduser().resolve()
+    output_srt = args.output or input_srt.with_name(input_srt.name.removesuffix(".srt") + ".whisperx.srt")
+    metadata_path = output_srt.with_suffix(".json")
+    try:
+        chunks = parse_srt_chunks(input_srt.read_text(encoding="utf-8-sig"))
+        with tqdm_progress() as progress:
+            result = align_chunks_with_whisperx(
+                chunks,
+                input_wav,
+                language_code=whisperx_language_code(args.language),
+                device=args.model_device,
+                model_name=args.whisperx_align_model,
+            )
+            progress(
+                ProgressEvent(
+                    stage="align",
+                    message="WhisperX alignment completed",
+                    current=len(result.chunks),
+                    total=len(chunks),
+                    percent=100.0,
+                    elapsed_seconds=None,
+                )
+            )
+    except (OSError, ValueError, WhisperXAlignmentError) as exc:
+        print_error(str(exc))
+        return 1
+    output_srt.parent.mkdir(parents=True, exist_ok=True)
+    output_srt.write_text(chunks_to_srt(result.chunks), encoding="utf-8")
+    write_alignment_metadata(metadata_path, result.metadata)
+    print("Done.")
+    print(f"  WhisperX Japanese SRT: {output_srt}")
+    print(f"  Metadata: {metadata_path}")
+    print(f"  Subtitles: {len(result.chunks)}")
+    print(f"  Changed timings: {result.metadata.get('changed_count')}")
+    return 0
+
+
+def whisperx_language_code(language: str) -> str:
+    normalized = language.strip().lower()
+    return {
+        "ja": "ja",
+        "japanese": "ja",
+        "jp": "ja",
+        "ko": "ko",
+        "korean": "ko",
+        "en": "en",
+        "english": "en",
+        "zh": "zh",
+        "chinese": "zh",
+    }.get(normalized, normalized)
+
+
 def iter_media_files(input_dir: Path) -> list[Path]:
     return sorted(path for path in input_dir.iterdir() if path.is_file() and is_supported_media(path))
 
@@ -247,6 +321,8 @@ def print_process_result(result: ProcessResult) -> None:
         print(f"Finished with status: {result.status}")
     if result.ja_srt_path is not None:
         print(f"  Japanese SRT: {result.ja_srt_path}")
+    if result.ja_aligned_srt_path is not None:
+        print(f"  WhisperX Japanese SRT: {result.ja_aligned_srt_path}")
     if result.ko_srt_path is not None:
         print(f"  Korean SRT: {result.ko_srt_path}")
     if result.copied_ko_srt_path is not None:

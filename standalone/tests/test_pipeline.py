@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import kotoba_standalone.pipeline as pipeline
+from kotoba_standalone.alignment import WhisperXAlignmentResult
 from kotoba_standalone.media import SilenceSpan
 from kotoba_standalone.pipeline import process_video, tail_retranscribe_long_subtitles, validate_silence_threshold
 from kotoba_standalone.pyannote_vad import PyannoteVadDependencyError, PyannoteVadResult
@@ -87,6 +88,44 @@ def test_process_video_writes_subtitles_with_fake_transcriber(tmp_path: Path, mo
     assert result.status == "success"
     assert result.ja_srt_path == tmp_path / "out" / "ja_short_test.ja.srt"
     assert (tmp_path / "out" / "ja_short_test.ja.srt").read_text(encoding="utf-8").strip()
+
+
+def test_process_video_can_write_whisperx_aligned_subtitles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeTranscriber:
+        def __init__(self, options: ProcessOptions) -> None:
+            self.options = options
+
+        def load(self) -> None:
+            return None
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            return FakeResult(0.0, 3.0, "こんにちは")
+
+    def fake_align(*args: object, **kwargs: object) -> WhisperXAlignmentResult:
+        return WhisperXAlignmentResult(
+            [SubtitleChunk(1.0, 2.0, "こんにちは")],
+            {"engine": "whisperx", "changed_count": 1},
+        )
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, "KotobaTranscriber", FakeTranscriber)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
+    monkeypatch.setattr(pipeline, "align_chunks_with_whisperx", fake_align)
+
+    result = process_video(
+        media,
+        ProcessOptions(output_dir=tmp_path / "out", vad_engine="ffmpeg", alignment_engine="whisperx"),
+    )
+
+    assert result.status == "success"
+    assert result.ja_aligned_srt_path == tmp_path / "out" / "ja_short_test.whisperx.ja.srt"
+    assert "00:00:01,000 --> 00:00:02,000" in result.ja_aligned_srt_path.read_text(encoding="utf-8")
+    process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
+    assert process_meta["alignment_engine"] == "whisperx"
+    assert process_meta["whisperx_changed_subtitle_count"] == 1
 
 
 def test_process_video_can_drop_likely_hallucinations_and_write_quality_report(

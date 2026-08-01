@@ -7,6 +7,7 @@ from typing import Literal
 
 KoreanStyle = Literal["polite", "banmal", "strict-banmal"]
 VadEngine = Literal["ffmpeg", "pyannote"]
+AlignmentEngine = Literal["none", "whisperx"]
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,8 @@ class ProcessOptions:
     annotate_subtitle_quality: bool = False
     tail_retranscribe_long_subtitles: bool = False
     tail_retranscribe_max_candidates: int = 20
+    alignment_engine: AlignmentEngine = "none"
+    whisperx_align_model: str | None = None
     translate: bool = False
     translation_model: str = "hf.co/mradermacher/Hy-MT2-30B-A3B-GGUF:Q4_K_M"
     ollama_host: str = "localhost"
@@ -61,6 +64,7 @@ class ProcessResult:
     copied_ko_srt_path: Path | None
     status: str
     message: str
+    ja_aligned_srt_path: Path | None = None
 
 
 @dataclass(frozen=True)

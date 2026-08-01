@@ -69,7 +69,7 @@ def translate_srt(
         raise FileNotFoundError(input_srt)
 
     assert_ollama_model_available(options)
-    output_srt = options.output or default_output_srt(input_srt)
+    output_srt = resolve_output_srt(input_srt, options.output)
     entries = parse_srt(input_srt)
     translated_texts = translate_entries(
         entries,
@@ -139,6 +139,17 @@ def default_output_srt(input_srt: Path) -> Path:
     if input_srt.name.endswith(".ja.srt"):
         return input_srt.with_name(input_srt.name.removesuffix(".ja.srt") + ".ko.srt")
     return input_srt.with_name(f"{input_srt.stem}.ko.srt")
+
+
+def resolve_output_srt(input_srt: Path, output: Path | None) -> Path:
+    if output is None:
+        return default_output_srt(input_srt)
+    output = output.expanduser()
+    if output.exists() and output.is_dir():
+        return output / default_output_srt(input_srt).name
+    if output.suffix:
+        return output
+    return output / default_output_srt(input_srt).name
 
 
 def parse_srt(path: Path) -> list[dict[str, str]]:

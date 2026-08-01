@@ -387,6 +387,23 @@ def chunks_to_json(chunks: list[SubtitleChunk]) -> list[dict[str, Any]]:
     return [{"start": chunk.start, "end": chunk.end, "text": chunk.text} for chunk in chunks]
 
 
+def parse_srt_chunks(text: str) -> list[SubtitleChunk]:
+    chunks: list[SubtitleChunk] = []
+    blocks = re.split(r"\r?\n\s*\r?\n", text.strip())
+    for block in blocks:
+        lines = [line.rstrip() for line in block.splitlines()]
+        if len(lines) < 2:
+            continue
+        timing_index = next((index for index, line in enumerate(lines) if "-->" in line), None)
+        if timing_index is None:
+            continue
+        start, end = _parse_srt_timing(lines[timing_index])
+        body = clean_text("\n".join(lines[timing_index + 1 :]))
+        if body:
+            chunks.append(SubtitleChunk(start, end, body))
+    return chunks
+
+
 def _parse_timestamp(timestamp: Any) -> tuple[float, float]:
     if isinstance(timestamp, (list, tuple)) and len(timestamp) >= 2:
         start = 0.0 if timestamp[0] is None else float(timestamp[0])
@@ -397,6 +414,19 @@ def _parse_timestamp(timestamp: Any) -> tuple[float, float]:
         end = start if timestamp.get("end") is None else float(timestamp["end"])
         return start, end
     raise ValueError(f"Unsupported timestamp format: {timestamp!r}")
+
+
+def _parse_srt_timing(line: str) -> tuple[float, float]:
+    left, right = [part.strip() for part in line.split("-->", 1)]
+    return _parse_srt_time(left), _parse_srt_time(right)
+
+
+def _parse_srt_time(value: str) -> float:
+    match = re.match(r"^(\d+):(\d{2}):(\d{2})[,.](\d{3})$", value.strip())
+    if not match:
+        raise ValueError(f"Unsupported SRT timestamp: {value}")
+    hours, minutes, seconds, milliseconds = (int(part) for part in match.groups())
+    return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
 
 
 def _join_text(left: str, right: str) -> str:

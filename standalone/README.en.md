@@ -108,6 +108,31 @@ uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-outpu
 
 `--annotate-subtitle-quality` writes `[quality: ...]` lines into the SRT body, so use it only for review. If translation is enabled, those tags may become part of the translation input.
 
+### WhisperX Alignment Experiment (CLI Only)
+
+WhisperX alignment can re-align an existing Japanese SRT against the extracted WAV. It is intentionally hidden from the GUI while it remains experimental.
+
+The current standalone Torch/pyannote pins are not compatible with the latest WhisperX dependency set, so WhisperX is not included in `uv.lock`. For a local experiment in an existing standalone environment, install only the minimal extras:
+
+```powershell
+uv pip install --no-deps whisperx==3.4.5
+uv pip install "nltk>=3.9.1"
+```
+
+Align an existing SRT and WAV:
+
+```powershell
+uv run --no-sync kotoba align "D:\Videos\sample.ja.srt" "D:\Videos\sample.standalone.wav" --output "D:\Videos\sample.whisperx.ja.srt"
+```
+
+Create an aligned SRT during processing:
+
+```powershell
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output" --whisperx-align
+```
+
+The original `*.ja.srt` is preserved. The aligned output is written as `*.whisperx.ja.srt` with a `*.whisperx-align.json` report. To avoid overly short Japanese interjection subtitles, the alignment currently uses WhisperX for the start time, preserves the original subtitle end time by default, and enforces a minimum display duration of 0.8 seconds.
+
 ## Translation
 
 Recommended Hy-MT2 Ollama models:
@@ -134,6 +159,8 @@ Translate an existing Japanese SRT:
 ```powershell
 uv run kotoba translate ".\tmp-output\sample.ja.srt" --model hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
 ```
+
+`--output` may be either an SRT file path or an output folder. When it is a folder, the translated `*.ko.srt` file is written there using the source subtitle name.
 
 Choose from models already downloaded in Ollama:
 
