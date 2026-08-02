@@ -262,8 +262,14 @@ def summarize_existing_translation(input_path: Path, output_dir: Path) -> str:
     return f"{len(pending)}개"
 
 
-def estimate_work_text(input_path: Path, output_dir: Path, translate: bool, ffmpeg_path: str = "") -> str:
-    process_seconds = _estimate_process_seconds(input_path, output_dir, ffmpeg_path)
+def estimate_work_text(
+    input_path: Path,
+    output_dir: Path,
+    translate: bool,
+    ffmpeg_path: str = "",
+    asr_backend: str = "kotoba",
+) -> str:
+    process_seconds = _estimate_process_seconds(input_path, output_dir, ffmpeg_path, asr_backend)
     translation_seconds = _estimate_translation_seconds(input_path, output_dir) if translate else None
     parts: list[str] = []
     if process_seconds is not None:
@@ -285,8 +291,8 @@ def recent_work_time_text(input_path: Path, output_dir: Path, include_translatio
     return " / ".join(parts) if parts else None
 
 
-def estimate_history_text(output_dir: Path) -> str:
-    process_count = len(_process_history_ratios(output_dir))
+def estimate_history_text(output_dir: Path, asr_backend: str = "kotoba") -> str:
+    process_count = len(_process_history_ratios(output_dir, asr_backend))
     translation_count = len(_translation_history_ratios(output_dir))
     details: list[str] = []
     if process_count:
@@ -427,9 +433,14 @@ def validate_input_path(path: Path) -> str | None:
     return None
 
 
-def _estimate_process_seconds(input_path: Path, output_dir: Path, ffmpeg_path: str = "") -> float | None:
+def _estimate_process_seconds(
+    input_path: Path,
+    output_dir: Path,
+    ffmpeg_path: str = "",
+    asr_backend: str = "kotoba",
+) -> float | None:
     target_duration = _target_media_duration_seconds(input_path, output_dir, ffmpeg_path)
-    ratios = _process_history_ratios(output_dir)
+    ratios = _process_history_ratios(output_dir, asr_backend)
     if not ratios:
         return None
     average_ratio = sum(ratios[-10:]) / min(len(ratios), 10)
@@ -449,13 +460,15 @@ def _estimate_translation_seconds(input_path: Path, output_dir: Path) -> float |
     return None
 
 
-def _process_history_ratios(output_dir: Path) -> list[float]:
+def _process_history_ratios(output_dir: Path, asr_backend: str | None = "kotoba") -> list[float]:
     ratios: list[float] = []
     if not output_dir.exists():
         return ratios
-    for metadata_path in output_dir.glob("*.process.json"):
+    for metadata_path in sorted(output_dir.glob("*.process.json"), key=lambda path: path.stat().st_mtime):
         data = _read_json(metadata_path)
-        media_duration = _positive_float(data.get("media_duration_seconds"))
+        if asr_backend and str(data.get("asr_backend") or "kotoba") != asr_backend:
+            continue
+        media_duration = _positive_float(data.get("media_duration_seconds")) or _positive_float(data.get("audio_duration_seconds"))
         processing_seconds = _positive_float(data.get("processing_seconds"))
         if media_duration and processing_seconds:
             ratios.append(processing_seconds / media_duration)
@@ -762,8 +775,8 @@ class KotobaLauncher:
         self.stop_button.grid(row=0, column=4, padx=4)
         self.open_output_button = ttk.Button(buttons, text="작업 폴더 열기", command=self.open_output_dir)
         self.open_output_button.grid(row=0, column=5, padx=4)
-        self.open_subtitle_button = ttk.Button(buttons, text="자막 열기", command=self.open_latest_subtitle)
-        self.open_subtitle_button.grid(row=0, column=6, padx=4)
+        self.open_input_button = ttk.Button(buttons, text="입력 폴더 열기", command=self.open_input_dir)
+        self.open_input_button.grid(row=0, column=6, padx=4)
 
         progress_panel = ttk.LabelFrame(outer, text="진행", padding=(10, 8))
         progress_panel.grid(row=8, column=0, columnspan=4, sticky="ew", pady=(4, 0))
@@ -1211,24 +1224,17 @@ class KotobaLauncher:
         output_dir.mkdir(parents=True, exist_ok=True)
         os.startfile(output_dir)
 
-    def open_latest_subtitle(self) -> None:
-        self._refresh_result_paths()
-        subtitle_paths = [path for path in self.last_result_paths if path.exists() and path.suffix.lower() == ".srt"]
-        if not subtitle_paths:
-            messagebox.showinfo("자막 열기", "열 수 있는 자막 파일이 아직 없습니다.")
+    def open_input_dir(self) -> None:
+        input_text = self.input_path.get().strip()
+        if not input_text:
+            messagebox.showinfo("입력 폴더 열기", "입력 영상 또는 폴더를 먼저 선택해 주세요.")
             return
-        latest = max(subtitle_paths, key=lambda path: path.stat().st_mtime)
-        app = default_app_for_extension(latest.suffix.lower())
-        if not messagebox.askyesno(
-            "자막 열기 확인",
-            "아래 자막 파일을 Windows 기본 연결 앱으로 엽니다.\n\n"
-            f"파일: {latest}\n"
-            f"연결 앱: {app}\n\n"
-            "연결 앱이 동영상 플레이어라면 소리가 재생될 수 있습니다.\n"
-            "계속 열까요?",
-        ):
+        input_path = Path(input_text)
+        target_dir = input_path.parent if input_path.is_file() else input_path
+        if not target_dir.exists():
+            messagebox.showwarning("입력 폴더 열기", f"입력 폴더가 존재하지 않습니다.\n\n{target_dir}")
             return
-        os.startfile(latest)
+        os.startfile(target_dir)
 
     def _refresh_derived_status(self) -> None:
         self._remember_state()
@@ -1242,7 +1248,7 @@ class KotobaLauncher:
         if not input_text:
             output_dir = Path(output_text)
             self.translation_status.set("입력/작업 폴더 필요")
-            self.estimate_status.set(estimate_history_text(output_dir))
+            self.estimate_status.set(estimate_history_text(output_dir, asr_backend_from_label(self.asr_engine.get())))
             self._update_translate_button_state()
             return
         input_path = Path(input_text)
@@ -1255,6 +1261,7 @@ class KotobaLauncher:
                 output_dir,
                 self.translate.get() or has_subtitles,
                 self.external_ffmpeg_path.get(),
+                asr_backend_from_label(self.asr_engine.get()),
             )
         )
         self._refresh_result_paths()

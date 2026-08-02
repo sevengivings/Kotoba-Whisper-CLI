@@ -368,6 +368,29 @@ def test_estimate_work_text_uses_processing_and_translation_history(tmp_path: Pa
     assert estimate_work_text(media, output_dir, translate=True) == "예상 전사 40초 / 예상 번역 15초"
 
 
+def test_estimate_work_text_filters_process_history_by_asr_backend(tmp_path: Path, monkeypatch) -> None:
+    media = tmp_path / "sample.mp4"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    media.write_text("", encoding="utf-8")
+    (output_dir / "kotoba.process.json").write_text(
+        json.dumps({"asr_backend": "kotoba", "media_duration_seconds": 100, "processing_seconds": 20}),
+        encoding="utf-8",
+    )
+    (output_dir / "qwen.process.json").write_text(
+        json.dumps({"asr_backend": "qwen3", "audio_duration_seconds": 100, "processing_seconds": 50}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher, "probe_duration_seconds", lambda path: 200.0)
+
+    assert estimate_work_text(media, output_dir, translate=False, asr_backend="kotoba") == (
+        f"예상 전사 {format_elapsed_korean(40)}"
+    )
+    assert estimate_work_text(media, output_dir, translate=False, asr_backend="qwen3") == (
+        f"예상 전사 {format_elapsed_korean(100)}"
+    )
+
+
 def test_estimate_work_text_reports_available_history_without_target_duration(tmp_path: Path, monkeypatch) -> None:
     media = tmp_path / "sample.mp4"
     output_dir = tmp_path / "out"
