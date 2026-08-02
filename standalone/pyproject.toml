@@ -25,8 +25,8 @@ transcribe = [
     "transformers==4.46.3",
 ]
 cuda = [
-    "torch==2.5.1",
-    "torchaudio==2.5.1",
+    "torch==2.7.1",
+    "torchaudio==2.7.1",
 ]
 pyannote = [
     "numpy>=2.0,<2.4",
@@ -47,13 +47,13 @@ conflicts = [
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu121" }
-torchaudio = { index = "pytorch-cu121" }
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
 
 [project.scripts]
 kotoba = "kotoba_standalone.cli:main"

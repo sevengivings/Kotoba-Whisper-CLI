@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import gc
 import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from kotoba_standalone.media import SilenceSpan
 
@@ -92,11 +93,14 @@ def detect_speech_spans_pyannote(
     pipeline: Any | None = None
     try:
         checkpoint, model_source = _resolve_model_checkpoint(model_name)
+        if model_source in {"bundled", "local"}:
+            _allow_trusted_pyannote_checkpoint_globals(torch)
         token = get_token() if model_source == "huggingface" else None
         if token is None and model_source == "huggingface":
             raise PyannoteVadAccessError(_access_error_message(model_name))
         try:
-            model = Model.from_pretrained(str(checkpoint), use_auth_token=token)
+            with _trusted_pyannote_checkpoint_load_compat(torch, model_source):
+                model = Model.from_pretrained(str(checkpoint), use_auth_token=token)
         except Exception as exc:
             raise _model_load_error(model_name, exc) from exc
         if model is None:
@@ -151,6 +155,34 @@ def _resolve_model_checkpoint(model_name: str) -> tuple[Path | str, str]:
     if local_path.is_file():
         return local_path, "local"
     return model_name, "huggingface"
+
+
+def _allow_trusted_pyannote_checkpoint_globals(torch: Any) -> None:
+    serialization = getattr(torch, "serialization", None)
+    add_safe_globals = getattr(serialization, "add_safe_globals", None)
+    torch_version_module = getattr(torch, "torch_version", None)
+    torch_version_class = getattr(torch_version_module, "TorchVersion", None)
+    if add_safe_globals is not None and torch_version_class is not None:
+        add_safe_globals([torch_version_class])
+
+
+@contextmanager
+def _trusted_pyannote_checkpoint_load_compat(torch: Any, model_source: str) -> Iterator[None]:
+    if model_source not in {"bundled", "local"}:
+        yield
+        return
+
+    original_load = torch.load
+
+    def trusted_load(*args: Any, **kwargs: Any) -> Any:
+        kwargs["weights_only"] = False
+        return original_load(*args, **kwargs)
+
+    torch.load = trusted_load
+    try:
+        yield
+    finally:
+        torch.load = original_load
 
 
 def _run_vad_pipeline(

@@ -12,6 +12,7 @@ from kotoba_standalone.pyannote_vad import (
     _model_load_error,
     _progress_hook,
     _resolve_model_checkpoint,
+    _trusted_pyannote_checkpoint_load_compat,
 )
 from kotoba_standalone.media import SilenceSpan
 
@@ -86,3 +87,22 @@ def test_local_pyannote_directory_resolves_checkpoint(tmp_path: Path) -> None:
 
     assert resolved == checkpoint
     assert source == "local"
+
+
+def test_trusted_checkpoint_load_compat_forces_full_checkpoint_load() -> None:
+    calls: list[bool | None] = []
+
+    class FakeTorch:
+        @staticmethod
+        def load(*args: object, **kwargs: object) -> object:
+            del args
+            calls.append(kwargs.get("weights_only"))
+            return {}
+
+    original_load = FakeTorch.load
+
+    with _trusted_pyannote_checkpoint_load_compat(FakeTorch, "bundled"):
+        FakeTorch.load("checkpoint.bin", weights_only=True)
+
+    assert calls == [False]
+    assert FakeTorch.load is original_load
