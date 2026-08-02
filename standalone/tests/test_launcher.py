@@ -184,6 +184,8 @@ def test_find_existing_japanese_subtitles_for_folder_input(tmp_path: Path) -> No
     output_dir = tmp_path / "out"
     input_dir.mkdir()
     output_dir.mkdir()
+    (input_dir / "a.mp4").write_text("", encoding="utf-8")
+    (input_dir / "b.mkv").write_text("", encoding="utf-8")
     first = output_dir / "a.ja.srt"
     second = output_dir / "b.ja.srt"
     first.write_text("", encoding="utf-8")
@@ -310,6 +312,19 @@ def test_pending_translation_subtitles_checks_copied_media_subtitle(tmp_path: Pa
     media.with_suffix(".srt").write_text("", encoding="utf-8")
 
     assert pending_translation_subtitles(media, output_dir) == []
+
+
+def test_find_existing_japanese_subtitles_for_folder_ignores_unrelated_output(tmp_path: Path) -> None:
+    input_dir = tmp_path / "media"
+    output_dir = tmp_path / "out"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    (input_dir / "current.mp4").write_text("", encoding="utf-8")
+    current = output_dir / "current.ja.srt"
+    current.write_text("", encoding="utf-8")
+    (output_dir / "old.ja.srt").write_text("", encoding="utf-8")
+
+    assert find_existing_japanese_subtitles(input_dir, output_dir) == [current]
 
 
 def test_ffmpeg_status_text_reports_path_source(monkeypatch) -> None:
@@ -505,6 +520,36 @@ def test_recent_work_time_text_sums_folder_results(tmp_path: Path) -> None:
         )
 
     assert recent_work_time_text(input_dir, output_dir, include_translation=True) == "최근 결과 전사 30초 / 최근 결과 번역 1분 0초"
+
+
+def test_recent_work_time_text_ignores_unrelated_folder_results(tmp_path: Path) -> None:
+    input_dir = tmp_path / "media"
+    output_dir = tmp_path / "out"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    (input_dir / "current.mp4").write_text("", encoding="utf-8")
+    (output_dir / "current.process.json").write_text(
+        json.dumps({"processing_seconds": 10}),
+        encoding="utf-8",
+    )
+    (output_dir / "current.ja.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\ntext\n", encoding="utf-8")
+    (output_dir / "current.ko.translation.json").write_text(
+        json.dumps({"processing_seconds": 20}),
+        encoding="utf-8",
+    )
+    (output_dir / "old.process.json").write_text(
+        json.dumps({"processing_seconds": 1000}),
+        encoding="utf-8",
+    )
+    (output_dir / "old.ja.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\ntext\n", encoding="utf-8")
+    (output_dir / "old.ko.translation.json").write_text(
+        json.dumps({"processing_seconds": 2000}),
+        encoding="utf-8",
+    )
+
+    assert recent_work_time_text(input_dir, output_dir, include_translation=True) == (
+        f"최근 결과 전사 {format_elapsed_korean(10)} / 최근 결과 번역 {format_elapsed_korean(20)}"
+    )
 
 
 def test_launcher_state_from_values(tmp_path: Path) -> None:

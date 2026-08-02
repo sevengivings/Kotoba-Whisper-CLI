@@ -159,7 +159,14 @@ def find_existing_japanese_subtitles(input_path: Path, output_dir: Path) -> list
         candidate = output_dir / f"{input_path.stem}.ja.srt"
         return [candidate] if candidate.exists() else []
     if input_path.is_dir():
-        return sorted(path for path in output_dir.glob("*.ja.srt") if path.is_file())
+        subtitles: list[Path] = []
+        for media_path in sorted(input_path.iterdir()):
+            if not media_path.is_file() or not is_supported_media(media_path):
+                continue
+            candidate = output_dir / f"{media_path.stem}.ja.srt"
+            if candidate.exists():
+                subtitles.append(candidate)
+        return subtitles
     return []
 
 
