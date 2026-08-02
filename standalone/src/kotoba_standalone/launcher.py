@@ -236,15 +236,40 @@ def summarize_existing_translation(input_path: Path, output_dir: Path) -> str:
     return f"{len(pending)}개"
 
 
-def estimate_work_text(input_path: Path, output_dir: Path, translate: bool) -> str:
-    process_seconds = _estimate_process_seconds(input_path, output_dir)
+def estimate_work_text(input_path: Path, output_dir: Path, translate: bool, ffmpeg_path: str = "") -> str:
+    process_seconds = _estimate_process_seconds(input_path, output_dir, ffmpeg_path)
     translation_seconds = _estimate_translation_seconds(input_path, output_dir) if translate else None
     parts: list[str] = []
     if process_seconds is not None:
         parts.append(f"예상 전사 {format_elapsed_korean(process_seconds)}")
     if translation_seconds is not None:
         parts.append(f"예상 번역 {format_elapsed_korean(translation_seconds)}")
-    return " / ".join(parts) if parts else "이력 부족"
+    return " / ".join(parts) if parts else estimate_history_text(output_dir)
+
+
+def recent_work_time_text(input_path: Path, output_dir: Path, include_translation: bool) -> str | None:
+    parts: list[str] = []
+    process_seconds = _process_seconds_for_input(input_path, output_dir)
+    if process_seconds is not None:
+        parts.append(f"최근 결과 전사 {format_elapsed_korean(process_seconds)}")
+    if include_translation:
+        translation_seconds = _translation_seconds_for_input(input_path, output_dir)
+        if translation_seconds is not None:
+            parts.append(f"최근 결과 번역 {format_elapsed_korean(translation_seconds)}")
+    return " / ".join(parts) if parts else None
+
+
+def estimate_history_text(output_dir: Path) -> str:
+    process_count = len(_process_history_ratios(output_dir))
+    translation_count = len(_translation_history_ratios(output_dir))
+    details: list[str] = []
+    if process_count:
+        details.append(f"전사 이력 {process_count}개")
+    if translation_count:
+        details.append(f"번역 이력 {translation_count}개")
+    if not details:
+        return "이력 부족"
+    return f"입력 선택 시 계산 가능 ({', '.join(details)})"
 
 
 def summarize_progress_line(line: str) -> str | None:
@@ -358,17 +383,9 @@ def validate_input_path(path: Path) -> str | None:
     return None
 
 
-def _estimate_process_seconds(input_path: Path, output_dir: Path) -> float | None:
-    target_duration = _media_duration_from_process_json(output_dir / f"{input_path.stem}.process.json") if input_path.is_file() else None
-    if target_duration is None and input_path.is_file() and input_path.exists():
-        target_duration = probe_duration_seconds(input_path)
-    ratios: list[float] = []
-    for metadata_path in output_dir.glob("*.process.json"):
-        data = _read_json(metadata_path)
-        media_duration = _positive_float(data.get("media_duration_seconds"))
-        processing_seconds = _positive_float(data.get("processing_seconds"))
-        if media_duration and processing_seconds:
-            ratios.append(processing_seconds / media_duration)
+def _estimate_process_seconds(input_path: Path, output_dir: Path, ffmpeg_path: str = "") -> float | None:
+    target_duration = _target_media_duration_seconds(input_path, output_dir, ffmpeg_path)
+    ratios = _process_history_ratios(output_dir)
     if not ratios:
         return None
     average_ratio = sum(ratios[-10:]) / min(len(ratios), 10)
@@ -378,14 +395,8 @@ def _estimate_process_seconds(input_path: Path, output_dir: Path) -> float | Non
 
 
 def _estimate_translation_seconds(input_path: Path, output_dir: Path) -> float | None:
-    target_count = _subtitle_count(output_dir / f"{input_path.stem}.ja.srt") if input_path.is_file() else None
-    ratios: list[float] = []
-    for metadata_path in output_dir.glob("*.translation.json"):
-        data = _read_json(metadata_path)
-        subtitle_count = _positive_float(data.get("subtitle_count"))
-        processing_seconds = _positive_float(data.get("processing_seconds"))
-        if subtitle_count and processing_seconds:
-            ratios.append(processing_seconds / subtitle_count)
+    target_count = _target_subtitle_count(input_path, output_dir)
+    ratios = _translation_history_ratios(output_dir)
     if not ratios:
         return None
     average_ratio = sum(ratios[-10:]) / min(len(ratios), 10)
@@ -394,9 +405,107 @@ def _estimate_translation_seconds(input_path: Path, output_dir: Path) -> float |
     return None
 
 
+def _process_history_ratios(output_dir: Path) -> list[float]:
+    ratios: list[float] = []
+    if not output_dir.exists():
+        return ratios
+    for metadata_path in output_dir.glob("*.process.json"):
+        data = _read_json(metadata_path)
+        media_duration = _positive_float(data.get("media_duration_seconds"))
+        processing_seconds = _positive_float(data.get("processing_seconds"))
+        if media_duration and processing_seconds:
+            ratios.append(processing_seconds / media_duration)
+    return ratios
+
+
+def _translation_history_ratios(output_dir: Path) -> list[float]:
+    ratios: list[float] = []
+    if not output_dir.exists():
+        return ratios
+    for metadata_path in output_dir.glob("*.translation.json"):
+        data = _read_json(metadata_path)
+        subtitle_count = _positive_float(data.get("subtitle_count"))
+        processing_seconds = _positive_float(data.get("processing_seconds"))
+        if subtitle_count and processing_seconds:
+            ratios.append(processing_seconds / subtitle_count)
+    return ratios
+
+
+def _target_media_duration_seconds(input_path: Path, output_dir: Path, ffmpeg_path: str = "") -> float | None:
+    if input_path.is_file():
+        target_duration = _media_duration_from_process_json(output_dir / f"{input_path.stem}.process.json")
+        return target_duration if target_duration is not None else _safe_probe_duration(input_path, ffmpeg_path)
+    if input_path.is_dir():
+        total = 0.0
+        for child in input_path.iterdir():
+            if child.is_file() and is_supported_media(child):
+                duration = _safe_probe_duration(child, ffmpeg_path)
+                if duration:
+                    total += duration
+        return total or None
+    return None
+
+
+def _target_subtitle_count(input_path: Path, output_dir: Path) -> int | None:
+    if input_path.is_file():
+        return _subtitle_count(output_dir / f"{input_path.stem}.ja.srt")
+    if input_path.is_dir():
+        total = 0
+        for subtitle in find_existing_japanese_subtitles(input_path, output_dir):
+            count = _subtitle_count(subtitle)
+            if count:
+                total += count
+        return total or None
+    return None
+
+
+def _safe_probe_duration(input_path: Path, ffmpeg_path: str = "") -> float | None:
+    old_ffmpeg_path = os.environ.get(FFMPEG_PATH_ENV)
+    try:
+        if ffmpeg_path.strip():
+            os.environ[FFMPEG_PATH_ENV] = ffmpeg_path.strip()
+        return probe_duration_seconds(input_path)
+    except Exception:
+        return None
+    finally:
+        if ffmpeg_path.strip():
+            if old_ffmpeg_path is None:
+                os.environ.pop(FFMPEG_PATH_ENV, None)
+            else:
+                os.environ[FFMPEG_PATH_ENV] = old_ffmpeg_path
+
+
 def _media_duration_from_process_json(path: Path) -> float | None:
     data = _read_json(path)
     return _positive_float(data.get("media_duration_seconds"))
+
+
+def _process_seconds_for_input(input_path: Path, output_dir: Path) -> float | None:
+    if input_path.is_file():
+        return _positive_float(_read_json(output_dir / f"{input_path.stem}.process.json").get("processing_seconds"))
+    if input_path.is_dir():
+        total = 0.0
+        for media_path in input_path.iterdir():
+            if media_path.is_file() and is_supported_media(media_path):
+                seconds = _positive_float(_read_json(output_dir / f"{media_path.stem}.process.json").get("processing_seconds"))
+                if seconds:
+                    total += seconds
+        return total or None
+    return None
+
+
+def _translation_seconds_for_input(input_path: Path, output_dir: Path) -> float | None:
+    if input_path.is_file():
+        return _positive_float(_read_json(output_dir / f"{input_path.stem}.ko.translation.json").get("processing_seconds"))
+    if input_path.is_dir():
+        total = 0.0
+        for subtitle in find_existing_japanese_subtitles(input_path, output_dir):
+            ko_srt = output_dir / default_output_srt(subtitle).name
+            seconds = _positive_float(_read_json(ko_srt.with_suffix(".translation.json")).get("processing_seconds"))
+            if seconds:
+                total += seconds
+        return total or None
+    return None
 
 
 def _subtitle_count(path: Path) -> int | None:
@@ -624,7 +733,7 @@ class KotobaLauncher:
 
         status_rows = [
             ("번역 대기 파일:", self.translation_status),
-            ("처리 시간 예상:", self.estimate_status),
+            ("처리 시간:", self.estimate_status),
             ("음성 추출 방법:", self.ffmpeg_status),
             ("Ollama 서버:", self.ollama_status),
         ]
@@ -868,7 +977,7 @@ class KotobaLauncher:
                 self._stop_progress_bar()
                 self._set_idle_buttons()
                 if payload == "0":
-                    self.status.set("완료")
+                    self.status.set("대기 중")
                     self.progress_summary.set("완료되었습니다.")
                     self.progress_detail.set("결과 파일을 확인할 수 있습니다.")
                     copied_paths = self._copy_pending_translations()
@@ -883,10 +992,11 @@ class KotobaLauncher:
                         )
                     self._append_log("\n완료되었습니다.\n")
                     self._refresh_derived_status()
+                    self._refresh_recent_work_time_status()
                     self._refresh_result_paths()
                     messagebox.showinfo("완료", "작업이 완료되었습니다.")
                 else:
-                    self.status.set("실패")
+                    self.status.set("대기 중")
                     self.progress_summary.set("실패했습니다.")
                     self.progress_detail.set("자세한 로그를 확인하세요.")
                     self._append_log(f"\n실패했습니다. 종료 코드: {payload}\n")
@@ -898,7 +1008,7 @@ class KotobaLauncher:
                 self.started_at = None
                 self._stop_progress_bar()
                 self._set_idle_buttons()
-                self.status.set("오류")
+                self.status.set("대기 중")
                 self.progress_summary.set("오류가 발생했습니다.")
                 self.progress_detail.set("자세한 로그를 확인하세요.")
                 self._append_log(f"\n오류: {payload}\n")
@@ -1039,18 +1149,43 @@ class KotobaLauncher:
         self._remember_state()
         input_text = self.input_path.get().strip()
         output_text = self.output_dir.get().strip()
-        if not input_text or not output_text:
+        if not output_text:
             self.translation_status.set("입력/작업 폴더 필요")
             self.estimate_status.set("이력 부족")
+            self._update_translate_button_state()
+            return
+        if not input_text:
+            output_dir = Path(output_text)
+            self.translation_status.set("입력/작업 폴더 필요")
+            self.estimate_status.set(estimate_history_text(output_dir))
             self._update_translate_button_state()
             return
         input_path = Path(input_text)
         output_dir = Path(output_text)
         has_subtitles = bool(pending_translation_subtitles(input_path, output_dir))
         self.translation_status.set(summarize_existing_translation(input_path, output_dir))
-        self.estimate_status.set(estimate_work_text(input_path, output_dir, self.translate.get() or has_subtitles))
+        self.estimate_status.set(
+            estimate_work_text(
+                input_path,
+                output_dir,
+                self.translate.get() or has_subtitles,
+                self.external_ffmpeg_path.get(),
+            )
+        )
         self._refresh_result_paths()
         self._update_translate_button_state()
+
+    def _refresh_recent_work_time_status(self) -> None:
+        input_text = self.input_path.get().strip()
+        output_text = self.output_dir.get().strip()
+        if not input_text or not output_text:
+            return
+        input_path = Path(input_text)
+        output_dir = Path(output_text)
+        has_translation = self.translate.get() or bool(existing_korean_subtitles(find_existing_japanese_subtitles(input_path, output_dir), output_dir))
+        recent_text = recent_work_time_text(input_path, output_dir, has_translation)
+        if recent_text:
+            self.estimate_status.set(recent_text)
 
     def _refresh_result_paths(self) -> None:
         input_text = self.input_path.get().strip()

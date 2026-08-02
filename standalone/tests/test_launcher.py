@@ -23,6 +23,8 @@ from kotoba_standalone.launcher import (
     media_filetypes,
     ollama_server_text,
     pending_translation_subtitles,
+    estimate_history_text,
+    recent_work_time_text,
     summarize_existing_translation,
     summarize_progress_line,
     validate_input_path,
@@ -340,6 +342,122 @@ def test_estimate_work_text_uses_processing_and_translation_history(tmp_path: Pa
     monkeypatch.setattr(launcher, "probe_duration_seconds", lambda path: 200.0)
 
     assert estimate_work_text(media, output_dir, translate=True) == "예상 전사 40초 / 예상 번역 15초"
+
+
+def test_estimate_work_text_reports_available_history_without_target_duration(tmp_path: Path, monkeypatch) -> None:
+    media = tmp_path / "sample.mp4"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    media.write_text("", encoding="utf-8")
+    (output_dir / "old.process.json").write_text(
+        json.dumps({"media_duration_seconds": 100, "processing_seconds": 20}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher, "probe_duration_seconds", lambda path: (_ for _ in ()).throw(RuntimeError("bad media")))
+
+    assert estimate_work_text(media, output_dir, translate=False) == "입력 선택 시 계산 가능 (전사 이력 1개)"
+
+
+def test_estimate_work_text_uses_configured_ffmpeg_path_for_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media = tmp_path / "sample.mp4"
+    output_dir = tmp_path / "out"
+    ffmpeg = tmp_path / "tools" / "ffmpeg.exe"
+    output_dir.mkdir()
+    ffmpeg.parent.mkdir()
+    media.write_text("", encoding="utf-8")
+    ffmpeg.write_text("", encoding="utf-8")
+    (output_dir / "old.process.json").write_text(
+        json.dumps({"media_duration_seconds": 100, "processing_seconds": 20}),
+        encoding="utf-8",
+    )
+    seen_env: list[str | None] = []
+
+    def fake_probe(path: Path) -> float:
+        seen_env.append(launcher.os.environ.get(launcher.FFMPEG_PATH_ENV))
+        return 200.0
+
+    monkeypatch.delenv(launcher.FFMPEG_PATH_ENV, raising=False)
+    monkeypatch.setattr(launcher, "probe_duration_seconds", fake_probe)
+
+    assert estimate_work_text(media, output_dir, translate=False, ffmpeg_path=str(ffmpeg)) == "예상 전사 40초"
+    assert seen_env == [str(ffmpeg)]
+    assert launcher.os.environ.get(launcher.FFMPEG_PATH_ENV) is None
+
+
+def test_estimate_history_text_counts_process_and_translation_history(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    (output_dir / "old.process.json").write_text(
+        json.dumps({"media_duration_seconds": 100, "processing_seconds": 20}),
+        encoding="utf-8",
+    )
+    (output_dir / "old.translation.json").write_text(
+        json.dumps({"subtitle_count": 10, "processing_seconds": 30}),
+        encoding="utf-8",
+    )
+
+    assert estimate_history_text(output_dir) == "입력 선택 시 계산 가능 (전사 이력 1개, 번역 이력 1개)"
+
+
+def test_estimate_work_text_sums_folder_media_durations(tmp_path: Path, monkeypatch) -> None:
+    input_dir = tmp_path / "media"
+    output_dir = tmp_path / "out"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    first = input_dir / "a.mp4"
+    second = input_dir / "b.mkv"
+    first.write_text("", encoding="utf-8")
+    second.write_text("", encoding="utf-8")
+    (output_dir / "old.process.json").write_text(
+        json.dumps({"media_duration_seconds": 100, "processing_seconds": 20}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher, "probe_duration_seconds", lambda path: 100.0)
+
+    assert estimate_work_text(input_dir, output_dir, translate=False) == "예상 전사 40초"
+
+
+def test_recent_work_time_text_reports_completed_process_and_translation(tmp_path: Path) -> None:
+    media = tmp_path / "sample.mp4"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    media.write_text("", encoding="utf-8")
+    (output_dir / "sample.process.json").write_text(
+        json.dumps({"processing_seconds": 276}),
+        encoding="utf-8",
+    )
+    (output_dir / "sample.ko.translation.json").write_text(
+        json.dumps({"processing_seconds": 571}),
+        encoding="utf-8",
+    )
+
+    assert recent_work_time_text(media, output_dir, include_translation=True) == "최근 결과 전사 4분 36초 / 최근 결과 번역 9분 31초"
+
+
+def test_recent_work_time_text_sums_folder_results(tmp_path: Path) -> None:
+    input_dir = tmp_path / "media"
+    output_dir = tmp_path / "out"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    first = input_dir / "a.mp4"
+    second = input_dir / "b.mkv"
+    first.write_text("", encoding="utf-8")
+    second.write_text("", encoding="utf-8")
+    for name, seconds in [("a", 10), ("b", 20)]:
+        (output_dir / f"{name}.process.json").write_text(
+            json.dumps({"processing_seconds": seconds}),
+            encoding="utf-8",
+        )
+        (output_dir / f"{name}.ja.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\ntext\n", encoding="utf-8")
+        (output_dir / f"{name}.ko.translation.json").write_text(
+            json.dumps({"processing_seconds": seconds * 2}),
+            encoding="utf-8",
+        )
+
+    assert recent_work_time_text(input_dir, output_dir, include_translation=True) == "최근 결과 전사 30초 / 최근 결과 번역 1분 0초"
 
 
 def test_launcher_state_from_values() -> None:

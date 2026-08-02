@@ -93,6 +93,17 @@ def test_ffprobe_exe_uses_path_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     assert media.ffprobe_exe() == r"C:\tools\ffprobe.exe"
 
 
+def test_ffprobe_exe_prefers_configured_ffmpeg_sibling(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    ffprobe = tmp_path / "ffprobe.exe"
+    ffmpeg.write_text("", encoding="utf-8")
+    ffprobe.write_text("", encoding="utf-8")
+    monkeypatch.setenv(media.FFMPEG_PATH_ENV, str(ffmpeg))
+    monkeypatch.setattr(media.shutil, "which", lambda name: r"C:\path\ffprobe.exe" if name == "ffprobe" else None)
+
+    assert media.ffprobe_exe() == str(ffprobe)
+
+
 def test_extract_audio_error_suggests_external_ffmpeg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     input_file = tmp_path / "broken.mp4"
     wav_path = tmp_path / "broken.wav"

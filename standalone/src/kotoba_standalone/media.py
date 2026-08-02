@@ -58,6 +58,13 @@ def ffmpeg_exe() -> str:
 
 
 def ffprobe_exe() -> str | None:
+    configured = os.environ.get(FFMPEG_PATH_ENV)
+    if configured:
+        configured_path = Path(configured).expanduser()
+        candidate = configured_path.with_name("ffprobe.exe" if configured_path.suffix.lower() == ".exe" else "ffprobe")
+        if candidate.exists():
+            return str(candidate)
+
     path_probe = shutil.which("ffprobe")
     if path_probe:
         return path_probe
