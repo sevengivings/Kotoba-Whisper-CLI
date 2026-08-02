@@ -8,6 +8,8 @@ import kotoba_standalone.launcher as launcher
 from kotoba_standalone.launcher import (
     LauncherOptions,
     LauncherTranslationOptions,
+    asr_backend_from_label,
+    asr_backend_label,
     build_process_command,
     build_translate_command,
     copy_korean_subtitles_to_input_location,
@@ -18,6 +20,7 @@ from kotoba_standalone.launcher import (
     ffmpeg_status_text,
     find_existing_japanese_subtitles,
     format_elapsed_korean,
+    launcher_output_dir_from_state,
     launcher_state_from_values,
     media_path_for_subtitle,
     media_filetypes,
@@ -53,7 +56,28 @@ def test_build_process_command_defaults_to_pyannote(tmp_path: Path) -> None:
     assert str(tmp_path / "sample.mp4") in command
     assert "--auto-silence-threshold" not in command
     assert command[command.index("--vad-engine") + 1] == "pyannote"
+    assert "--asr-backend" not in command
     assert "--translate" not in command
+
+
+def test_build_process_command_adds_qwen_backend(tmp_path: Path) -> None:
+    command = build_process_command(
+        LauncherOptions(
+            input_path=tmp_path / "sample.mp4",
+            output_dir=tmp_path / "out",
+            asr_backend="qwen3",
+        )
+    )
+
+    assert command[command.index("--asr-backend") + 1] == "qwen3"
+    assert command[command.index("--model-dtype") + 1] == "bfloat16"
+
+
+def test_asr_backend_label_helpers() -> None:
+    assert asr_backend_from_label("Qwen3-ASR 1.7B (실험)") == "qwen3"
+    assert asr_backend_from_label("Kotoba-Whisper v2.2") == "kotoba"
+    assert asr_backend_label("qwen3").startswith("Qwen3-ASR")
+    assert asr_backend_label("unknown") == "Kotoba-Whisper v2.2"
 
 
 def test_build_process_command_adds_translation_options(tmp_path: Path) -> None:
@@ -460,11 +484,32 @@ def test_recent_work_time_text_sums_folder_results(tmp_path: Path) -> None:
     assert recent_work_time_text(input_dir, output_dir, include_translation=True) == "최근 결과 전사 30초 / 최근 결과 번역 1분 0초"
 
 
-def test_launcher_state_from_values() -> None:
-    assert launcher_state_from_values("out", "cpu", "ffmpeg", "ollama.local", 11435) == {
+def test_launcher_state_from_values(tmp_path: Path) -> None:
+    assert launcher_state_from_values("out", "cpu", "ffmpeg", "ollama.local", 11435, install_root=tmp_path) == {
+        "install_root": str(tmp_path),
         "last_output_dir": "out",
         "last_model_device": "cpu",
         "external_ffmpeg_path": "ffmpeg",
         "ollama_host": "ollama.local",
         "ollama_port": 11435,
+        "asr_backend": "kotoba",
     }
+
+
+def test_launcher_output_dir_ignores_state_from_other_install(tmp_path: Path) -> None:
+    current_root = tmp_path / "current"
+    old_root = tmp_path / "old"
+    state = launcher_state_from_values(
+        str(old_root / "tmp-output"),
+        "cuda:0",
+        install_root=old_root,
+    )
+
+    assert launcher_output_dir_from_state(state, current_root) == current_root / "tmp-output"
+
+
+def test_launcher_output_dir_reuses_state_for_same_install(tmp_path: Path) -> None:
+    output_dir = tmp_path / "custom-output"
+    state = launcher_state_from_values(str(output_dir), "cuda:0", install_root=tmp_path)
+
+    assert launcher_output_dir_from_state(state, tmp_path) == output_dir

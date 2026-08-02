@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterator
 
 import kotoba_standalone.cli as cli
-from kotoba_standalone.media import FFmpegAudioExtractionError
+from kotoba_standalone.media import FFMPEG_PATH_ENV, FFmpegAudioExtractionError
 from kotoba_standalone.translate.ollama import OllamaUnavailableError
 from kotoba_standalone.types import ProcessResult, TranslationResult
 
@@ -29,8 +30,95 @@ def test_process_parser_defaults_to_pyannote(tmp_path: Path) -> None:
     args = cli.build_parser().parse_args(["process", str(tmp_path / "a.mp4")])
 
     assert args.vad_engine == "pyannote"
+    assert args.asr_backend == "kotoba"
     assert args.auto_silence_threshold is False
     assert args.alignment_engine == "none"
+
+
+def test_process_parser_accepts_hidden_qwen_backend(tmp_path: Path) -> None:
+    args = cli.build_parser().parse_args(["process", str(tmp_path / "a.mp4"), "--asr-backend", "qwen3"])
+
+    assert args.asr_backend == "qwen3"
+    assert args.qwen_model_name == "Qwen/Qwen3-ASR-1.7B"
+    assert args.qwen_aligner_model == "Qwen/Qwen3-ForcedAligner-0.6B"
+    assert args.qwen_return_timestamps is True
+
+
+def test_qwen_backend_reports_missing_experiment_environment(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "qwen_dependencies_available", lambda: False)
+    monkeypatch.setattr(cli, "qwen_environment_python", lambda: None)
+
+    exit_code = cli.main(["process", str(tmp_path / "a.mp4"), "--asr-backend", "qwen3"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Qwen3-ASR experimental environment was not found" in captured.out
+    assert "uv sync --group cuda --group pyannote --group qwen" in captured.out
+
+
+def test_qwen_backend_reexecs_with_experiment_environment(tmp_path: Path, monkeypatch) -> None:
+    calls: list[tuple[list[str], Path, dict[str, str]]] = []
+    qwen_python = tmp_path / ".venv-qwen" / "Scripts" / "python.exe"
+    qwen_python.parent.mkdir(parents=True)
+    qwen_python.write_text("", encoding="utf-8")
+    monkeypatch.delenv(FFMPEG_PATH_ENV, raising=False)
+
+    def fake_run(command: list[str], cwd: Path, env: dict[str, str]) -> SimpleNamespace:
+        calls.append((command, cwd, env))
+        return SimpleNamespace(returncode=7)
+
+    monkeypatch.setattr(cli, "qwen_dependencies_available", lambda: False)
+    monkeypatch.setattr(cli, "qwen_environment_python", lambda: qwen_python)
+    monkeypatch.setattr(cli, "standalone_root", lambda: tmp_path)
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    exit_code = cli.main([
+        "process",
+        str(tmp_path / "a.mp4"),
+        "--asr-backend",
+        "qwen3",
+        "--ffmpeg-path",
+        ffmpeg_path,
+    ])
+
+    assert exit_code == 7
+    command, cwd, env = calls[0]
+    assert command[:3] == [str(qwen_python), "-m", "kotoba_standalone.cli"]
+    assert "--asr-backend" in command
+    assert "--ffmpeg-path" in command
+    assert cwd == tmp_path
+    assert env["KOTOBA_QWEN_REEXEC"] == "1"
+    assert env[FFMPEG_PATH_ENV] == ffmpeg_path
+
+
+def test_process_parser_applies_ffmpeg_path_environment(tmp_path: Path, monkeypatch) -> None:
+    ffmpeg_path = r"C:\Tools\ffmpeg.exe"
+    seen_env: list[str | None] = []
+    monkeypatch.delenv(FFMPEG_PATH_ENV, raising=False)
+    monkeypatch.setenv("KOTOBA_QWEN_REEXEC", "1")
+
+    def fake_process_video(*args: object, **kwargs: object) -> ProcessResult:
+        seen_env.append(cli.os.environ.get(FFMPEG_PATH_ENV))
+        return ProcessResult(
+            input_path=tmp_path / "a.mp4",
+            output_dir=tmp_path,
+            wav_path=None,
+            ja_srt_path=None,
+            ko_srt_path=None,
+            copied_ko_srt_path=None,
+            status="success",
+            message="ok",
+        )
+
+    monkeypatch.setattr(cli, "process_video", fake_process_video)
+    monkeypatch.setattr(cli, "tqdm_progress", null_progress)
+
+    exit_code = cli.main(["process", str(tmp_path / "a.mp4"), "--ffmpeg-path", ffmpeg_path])
+
+    assert exit_code == 0
+    assert seen_env == [ffmpeg_path]
+    assert cli.os.environ.get(FFMPEG_PATH_ENV) is None
 
 
 def test_process_parser_accepts_whisperx_alignment(tmp_path: Path) -> None:

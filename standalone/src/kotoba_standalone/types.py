@@ -8,6 +8,7 @@ from typing import Literal
 KoreanStyle = Literal["polite", "banmal", "strict-banmal"]
 VadEngine = Literal["ffmpeg", "pyannote"]
 AlignmentEngine = Literal["none", "whisperx"]
+AsrBackend = Literal["kotoba", "qwen3"]
 
 
 @dataclass(frozen=True)
@@ -34,11 +35,15 @@ class ProcessOptions:
     vad_min_speech_duration_s: float = 0.25
     vad_padding_s: float = 0.4
     vad_merge_gap_s: float = 0.0
+    asr_backend: AsrBackend = "kotoba"
     batch_size: int = 8
     chunk_length_s: int = 15
     model_name: str = "kotoba-tech/kotoba-whisper-v2.2"
     model_device: str = "cuda:0"
     model_dtype: str = "float16"
+    qwen_model_name: str = "Qwen/Qwen3-ASR-1.7B"
+    qwen_aligner_model: str = "Qwen/Qwen3-ForcedAligner-0.6B"
+    qwen_return_timestamps: bool = True
     report_subtitle_quality: bool = False
     drop_likely_hallucinations: bool = False
     split_long_subtitles: bool = False

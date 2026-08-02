@@ -24,7 +24,7 @@ if errorlevel 1 (
   if errorlevel 1 (
     echo.
     echo uv was installed, but this window cannot find it yet.
-    echo Please close this window and run install-windows.bat again.
+    echo Please close this window and run install-kotoba.bat again.
     pause
     exit /b 1
   )
@@ -42,5 +42,5 @@ if errorlevel 1 (
 
 echo.
 echo Setup completed.
-echo You can start Kotoba with run-kotoba.bat.
+echo You can start Kotoba with run-gui.bat.
 pause

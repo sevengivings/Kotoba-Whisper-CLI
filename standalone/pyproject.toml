@@ -34,6 +34,17 @@ pyannote = [
     "pyannote.audio==3.4.0",
     "speechbrain==1.0.3",
 ]
+qwen = [
+    "qwen-asr>=0.0.6",
+]
+
+[tool.uv]
+conflicts = [
+    [
+        { group = "transcribe" },
+        { group = "qwen" },
+    ],
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu121"

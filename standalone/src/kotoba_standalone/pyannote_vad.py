@@ -30,6 +30,8 @@ PYANNOTE_MODEL_URL = "https://huggingface.co/pyannote/segmentation-3.0"
 BUNDLED_PYANNOTE_MODEL_REVISION = "e66f3d3b9eb0873085418a7b813d3b369bf160bb"
 BUNDLED_PYANNOTE_MODEL_DIR = Path(__file__).resolve().parent / "models" / "pyannote-segmentation-3.0"
 BUNDLED_PYANNOTE_MODEL_CHECKPOINT = BUNDLED_PYANNOTE_MODEL_DIR / "pytorch_model.bin"
+PYANNOTE_VAD_CHUNK_DURATION_S = 30 * 60.0
+PYANNOTE_VAD_CHUNK_OVERLAP_S = 1.0
 PyannoteProgressCallback = Callable[[int, int], None]
 
 
@@ -53,6 +55,8 @@ class PyannoteVadResult:
     pyannote_audio_version: str
     model_source: str = "huggingface"
     model_revision: str | None = None
+    chunk_duration_s: float | None = None
+    processed_audio_duration_s: float | None = None
 
 
 def detect_speech_spans_pyannote(
@@ -67,6 +71,7 @@ def detect_speech_spans_pyannote(
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="invalid escape sequence", category=SyntaxWarning)
             import torch
+            import torchaudio
             import pyannote.audio
             from huggingface_hub import get_token
             from pyannote.audio import Model
@@ -105,12 +110,12 @@ def detect_speech_spans_pyannote(
             }
         )
         pipeline.to(torch.device(device))
-        output = pipeline(str(wav_path), hook=_progress_hook(progress))
-        speech_spans = [
-            SilenceSpan(float(segment.start), float(segment.end))
-            for segment in output.get_timeline().support()
-            if segment.end > segment.start
-        ]
+        speech_spans, chunk_duration_s, processed_audio_duration_s = _run_vad_pipeline(
+            pipeline,
+            wav_path,
+            torchaudio,
+            progress,
+        )
         return PyannoteVadResult(
             speech_spans=speech_spans,
             model_name=model_name,
@@ -120,6 +125,8 @@ def detect_speech_spans_pyannote(
             model_revision=(
                 BUNDLED_PYANNOTE_MODEL_REVISION if model_source == "bundled" else None
             ),
+            chunk_duration_s=chunk_duration_s,
+            processed_audio_duration_s=processed_audio_duration_s,
         )
     finally:
         del pipeline
@@ -144,6 +151,97 @@ def _resolve_model_checkpoint(model_name: str) -> tuple[Path | str, str]:
     if local_path.is_file():
         return local_path, "local"
     return model_name, "huggingface"
+
+
+def _run_vad_pipeline(
+    pipeline: Any,
+    wav_path: Path,
+    torchaudio: Any,
+    progress: PyannoteProgressCallback | None,
+) -> tuple[list[SilenceSpan], float | None, float | None]:
+    info = torchaudio.info(str(wav_path))
+    sample_rate = int(info.sample_rate)
+    total_frames = int(info.num_frames)
+    if sample_rate <= 0 or total_frames <= 0:
+        output = pipeline(str(wav_path), hook=_progress_hook(progress))
+        return _speech_spans_from_output(output), None, None
+
+    chunk_ranges = _chunk_frame_ranges(
+        total_frames,
+        sample_rate,
+        PYANNOTE_VAD_CHUNK_DURATION_S,
+        PYANNOTE_VAD_CHUNK_OVERLAP_S,
+    )
+    if len(chunk_ranges) <= 1:
+        output = pipeline(str(wav_path), hook=_progress_hook(progress))
+        return _speech_spans_from_output(output), None, total_frames / sample_rate
+
+    speech_spans: list[SilenceSpan] = []
+    for index, (frame_offset, num_frames) in enumerate(chunk_ranges, start=1):
+        waveform, chunk_sample_rate = torchaudio.load(
+            str(wav_path),
+            frame_offset=frame_offset,
+            num_frames=num_frames,
+        )
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+        output = pipeline({"waveform": waveform, "sample_rate": chunk_sample_rate})
+        chunk_start = frame_offset / chunk_sample_rate
+        speech_spans.extend(
+            SilenceSpan(float(segment.start) + chunk_start, float(segment.end) + chunk_start)
+            for segment in output.get_timeline().support()
+            if segment.end > segment.start
+        )
+        if progress is not None:
+            progress(index, len(chunk_ranges))
+
+    return (
+        _merge_overlapping_spans(speech_spans),
+        PYANNOTE_VAD_CHUNK_DURATION_S,
+        total_frames / sample_rate,
+    )
+
+
+def _speech_spans_from_output(output: Any) -> list[SilenceSpan]:
+    return [
+        SilenceSpan(float(segment.start), float(segment.end))
+        for segment in output.get_timeline().support()
+        if segment.end > segment.start
+    ]
+
+
+def _chunk_frame_ranges(
+    total_frames: int,
+    sample_rate: int,
+    chunk_duration_s: float,
+    overlap_s: float,
+) -> list[tuple[int, int]]:
+    chunk_frames = max(1, int(chunk_duration_s * sample_rate))
+    overlap_frames = max(0, int(overlap_s * sample_rate))
+    step_frames = max(1, chunk_frames - overlap_frames)
+    ranges: list[tuple[int, int]] = []
+    offset = 0
+    while offset < total_frames:
+        frames = min(chunk_frames, total_frames - offset)
+        ranges.append((offset, frames))
+        if offset + frames >= total_frames:
+            break
+        offset += step_frames
+    return ranges
+
+
+def _merge_overlapping_spans(spans: list[SilenceSpan]) -> list[SilenceSpan]:
+    if not spans:
+        return []
+    sorted_spans = sorted(spans, key=lambda span: (span.start, span.end))
+    merged = [sorted_spans[0]]
+    for span in sorted_spans[1:]:
+        previous = merged[-1]
+        if span.start <= previous.end + 0.05:
+            merged[-1] = SilenceSpan(previous.start, max(previous.end, span.end))
+        else:
+            merged.append(span)
+    return merged
 
 
 def _progress_hook(progress: PyannoteProgressCallback | None) -> Callable[..., None] | None:

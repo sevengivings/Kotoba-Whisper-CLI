@@ -11,7 +11,7 @@ REM set KOTOBA_FFMPEG_PATH=C:\Python\Faster-Whisper-XXL\ffmpeg.exe
 where uv >nul 2>nul
 if errorlevel 1 (
   echo uv was not found.
-  echo Run install-windows.bat first, then try this file again.
+  echo Run install-kotoba.bat first, then try this file again.
   pause
   exit /b 1
 )

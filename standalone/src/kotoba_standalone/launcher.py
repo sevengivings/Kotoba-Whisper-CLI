@@ -46,6 +46,7 @@ class LauncherOptions:
     translation_model: str = ""
     korean_style: str = "polite"
     model_device: str = "cuda:0"
+    asr_backend: str = "kotoba"
     ollama_host: str = "localhost"
     ollama_port: int = 11434
 
@@ -86,6 +87,8 @@ def build_process_command(options: LauncherOptions) -> list[str]:
         "--vad-engine",
         "pyannote",
     ]
+    if options.asr_backend == "qwen3":
+        command.extend(["--asr-backend", "qwen3", "--model-dtype", "bfloat16"])
     if options.translate:
         command.append("--translate")
         if options.translation_model.strip():
@@ -101,6 +104,29 @@ def build_process_command(options: LauncherOptions) -> list[str]:
             ]
         )
     return command
+
+
+def qwen_environment_status_text() -> str:
+    if qwen_environment_python().exists():
+        return "설치됨 (.venv-qwen)"
+    return "설치 필요 (install-qwen3.bat)"
+
+
+def qwen_environment_python() -> Path:
+    root = Path(__file__).resolve().parents[2]
+    if sys.platform == "win32":
+        return root / ".venv-qwen" / "Scripts" / "python.exe"
+    return root / ".venv-qwen" / "bin" / "python"
+
+
+def asr_backend_from_label(label: str) -> str:
+    return "qwen3" if "Qwen3" in label else "kotoba"
+
+
+def asr_backend_label(value: str) -> str:
+    if value == "qwen3":
+        return "Qwen3-ASR 1.7B (실험)"
+    return "Kotoba-Whisper v2.2"
 
 
 def build_translate_command(input_srt: Path, options: LauncherTranslationOptions) -> list[str]:
@@ -352,14 +378,32 @@ def launcher_state_from_values(
     ffmpeg_path: str = "",
     ollama_host: str = "localhost",
     ollama_port: int = 11434,
+    asr_backend: str = "kotoba",
+    install_root: Path | None = None,
 ) -> dict:
+    root = install_root or standalone_root()
     return {
+        "install_root": str(root),
         "last_output_dir": output_dir,
         "last_model_device": model_device,
         "external_ffmpeg_path": ffmpeg_path,
         "ollama_host": ollama_host,
         "ollama_port": ollama_port,
+        "asr_backend": asr_backend if asr_backend in {"kotoba", "qwen3"} else "kotoba",
     }
+
+
+def standalone_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def launcher_output_dir_from_state(state: dict, app_root: Path | None = None) -> Path:
+    root = app_root or standalone_root()
+    if str(state.get("install_root") or "") == str(root):
+        saved_output = state.get("last_output_dir")
+        if isinstance(saved_output, str) and saved_output.strip():
+            return Path(saved_output)
+    return root / "tmp-output"
 
 
 def media_filetypes() -> list[tuple[str, str]]:
@@ -587,8 +631,21 @@ def configure_theme(root: Tk) -> None:
         foreground=[("disabled", "#8b95a1")],
     )
     style.configure("TEntry", fieldbackground="#ffffff", bordercolor="#c7ceda", padding=(6, 5))
-    style.configure("TCombobox", fieldbackground="#ffffff", background="#ffffff", bordercolor="#c7ceda", padding=(6, 5))
-    style.map("TCombobox", fieldbackground=[("readonly", "#ffffff")], selectbackground=[("readonly", "#eaf1ff")])
+    style.configure(
+        "TCombobox",
+        fieldbackground="#ffffff",
+        background="#ffffff",
+        foreground=text,
+        bordercolor="#c7ceda",
+        padding=(6, 5),
+    )
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", "#ffffff"), ("focus", "#ffffff")],
+        foreground=[("readonly", text), ("focus", text)],
+        selectbackground=[("readonly", "#ffffff"), ("focus", "#ffffff")],
+        selectforeground=[("readonly", text), ("focus", text)],
+    )
     style.configure("Horizontal.TProgressbar", background=accent, troughcolor="#e6eaf0", bordercolor="#e6eaf0")
     root.configure(background=background)
 
@@ -597,7 +654,8 @@ class KotobaLauncher:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("Kotoba Standalone")
-        self.root.geometry("860x560")
+        self.root.geometry("860x620")
+        self.root.minsize(820, 620)
         self.events: queue.Queue[tuple[str, str | None]] = queue.Queue()
         self.process: subprocess.Popen[str] | None = None
         self.started_at: float | None = None
@@ -606,20 +664,23 @@ class KotobaLauncher:
         self.log_buffer = ""
         self.log_window: Toplevel | None = None
         self.log_widget: ScrolledText | None = None
+        self.app_root = standalone_root()
         state = load_launcher_state()
 
         self.input_path = StringVar(value="")
-        self.output_dir = StringVar(value=str(state.get("last_output_dir") or Path.cwd() / "tmp-output"))
+        self.output_dir = StringVar(value=str(launcher_output_dir_from_state(state, self.app_root)))
         self.translate = BooleanVar(value=False)
         self.model = StringVar(value=load_saved_translation_model() or DEFAULT_TRANSLATION_MODEL)
         self.korean_style = StringVar(value="polite")
         self.model_device = StringVar(value=str(state.get("last_model_device") or "cuda:0"))
+        self.asr_engine = StringVar(value=asr_backend_label(str(state.get("asr_backend") or "kotoba")))
         self.external_ffmpeg_path = StringVar(value=str(state.get("external_ffmpeg_path") or ""))
         self.ollama_host = StringVar(value=str(state.get("ollama_host") or "localhost"))
         self.ollama_port = StringVar(value=str(state.get("ollama_port") or "11434"))
         self.status = StringVar(value="대기 중")
         self.ffmpeg_status = StringVar(value=ffmpeg_status_text(self.external_ffmpeg_path.get()))
         self.ollama_status = StringVar(value=ollama_server_text(self.ollama_host.get(), self.ollama_port.get()))
+        self.qwen_status = StringVar(value=qwen_environment_status_text())
         self.translation_status = StringVar(value="확인 전")
         self.estimate_status = StringVar(value="이력 부족")
         self.progress_summary = StringVar(value="대기 중")
@@ -630,6 +691,7 @@ class KotobaLauncher:
         self.input_path.trace_add("write", lambda *_args: self._refresh_derived_status())
         self.output_dir.trace_add("write", lambda *_args: self._refresh_derived_status())
         self.model_device.trace_add("write", lambda *_args: self._remember_state())
+        self.asr_engine.trace_add("write", lambda *_args: self._refresh_qwen_status())
         self.external_ffmpeg_path.trace_add("write", lambda *_args: self._refresh_ffmpeg_status())
         self.ollama_host.trace_add("write", lambda *_args: self._refresh_ollama_status())
         self.ollama_port.trace_add("write", lambda *_args: self._refresh_ollama_status())
@@ -653,31 +715,40 @@ class KotobaLauncher:
             row=1, column=2, columnspan=2, sticky="ew", padx=3, pady=form_pady
         )
 
-        ttk.Label(outer, text="번역 모델").grid(row=2, column=0, sticky="w", pady=form_pady)
-        ttk.Entry(outer, textvariable=self.model).grid(row=2, column=1, sticky="ew", padx=8, pady=form_pady)
+        ttk.Label(outer, text="전사 엔진").grid(row=2, column=0, sticky="w", pady=form_pady)
+        ttk.Combobox(
+            outer,
+            textvariable=self.asr_engine,
+            values=("Kotoba-Whisper v2.2", "Qwen3-ASR 1.7B (실험)"),
+            state="readonly",
+            width=24,
+        ).grid(row=2, column=1, sticky="w", padx=8, pady=form_pady)
+
+        ttk.Label(outer, text="번역 모델").grid(row=3, column=0, sticky="w", pady=form_pady)
+        ttk.Entry(outer, textvariable=self.model).grid(row=3, column=1, sticky="ew", padx=8, pady=form_pady)
         ttk.Button(outer, text="Ollama 모델", command=self.load_ollama_models).grid(
-            row=2, column=2, sticky="ew", padx=3, pady=form_pady
+            row=3, column=2, sticky="ew", padx=3, pady=form_pady
         )
         ttk.Button(outer, text="Ollama 확인", command=self.check_ollama).grid(
-            row=2, column=3, sticky="ew", padx=3, pady=form_pady
+            row=3, column=3, sticky="ew", padx=3, pady=form_pady
         )
 
-        ttk.Label(outer, text="한국어 말투").grid(row=3, column=0, sticky="w", pady=form_pady)
+        ttk.Label(outer, text="한국어 말투").grid(row=4, column=0, sticky="w", pady=form_pady)
         ttk.Combobox(
             outer,
             textvariable=self.korean_style,
             values=("polite", "banmal", "strict-banmal"),
             state="readonly",
             width=18,
-        ).grid(row=3, column=1, sticky="w", padx=8, pady=form_pady)
+        ).grid(row=4, column=1, sticky="w", padx=8, pady=form_pady)
 
-        ttk.Label(outer, text="처리 장치").grid(row=4, column=0, sticky="w", pady=form_pady)
+        ttk.Label(outer, text="처리 장치").grid(row=5, column=0, sticky="w", pady=form_pady)
         ttk.Combobox(
             outer,
             textvariable=self.model_device,
             values=("cuda:0", "cpu"),
             width=18,
-        ).grid(row=4, column=1, sticky="w", padx=8, pady=form_pady)
+        ).grid(row=5, column=1, sticky="w", padx=8, pady=form_pady)
 
         buttons = ttk.Frame(outer)
         buttons.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(10, 8))
@@ -735,6 +806,7 @@ class KotobaLauncher:
             ("번역 대기 파일:", self.translation_status),
             ("처리 시간:", self.estimate_status),
             ("음성 추출 방법:", self.ffmpeg_status),
+            ("Qwen3-ASR:", self.qwen_status),
             ("Ollama 서버:", self.ollama_status),
         ]
         for row, (label, variable) in enumerate(status_rows):
@@ -845,13 +917,22 @@ class KotobaLauncher:
         ollama_port = self._ollama_port_or_warn()
         if ollama_port is None:
             return
+        asr_backend = asr_backend_from_label(self.asr_engine.get())
+        if asr_backend == "qwen3" and not qwen_environment_python().exists():
+            messagebox.showwarning(
+                "Qwen3-ASR 설치 필요",
+                "Qwen3-ASR을 사용하려면 먼저 standalone\\install-qwen3.bat를 실행해 주세요.",
+            )
+            self._refresh_qwen_status()
+            return
         options = LauncherOptions(
             input_path=Path(input_text),
-            output_dir=Path(self.output_dir.get().strip() or Path.cwd() / "tmp-output"),
+            output_dir=Path(self.output_dir.get().strip() or self.app_root / "tmp-output"),
             translate=self.translate.get(),
             translation_model=self.model.get(),
             korean_style=self.korean_style.get(),
             model_device=self.model_device.get().strip() or "cuda:0",
+            asr_backend=asr_backend,
             ollama_host=self.ollama_host.get().strip() or "localhost",
             ollama_port=ollama_port,
         )
@@ -875,7 +956,7 @@ class KotobaLauncher:
             messagebox.showwarning("입력 필요", "처리한 영상 파일 또는 폴더를 선택하세요.")
             return
         input_path = Path(input_text)
-        output_dir = Path(self.output_dir.get().strip() or Path.cwd() / "tmp-output")
+        output_dir = Path(self.output_dir.get().strip() or self.app_root / "tmp-output")
         validation_error = validate_input_path(input_path)
         if validation_error is not None:
             messagebox.showwarning("입력 확인", validation_error)
@@ -1110,6 +1191,10 @@ class KotobaLauncher:
         self.ollama_status.set(ollama_server_text(self.ollama_host.get(), self.ollama_port.get()))
         self._remember_state()
 
+    def _refresh_qwen_status(self) -> None:
+        self.qwen_status.set(qwen_environment_status_text())
+        self._remember_state()
+
     def _ollama_port_or_warn(self) -> int | None:
         try:
             port = int(self.ollama_port.get().strip())
@@ -1205,6 +1290,8 @@ class KotobaLauncher:
                 self.external_ffmpeg_path.get().strip(),
                 self.ollama_host.get().strip() or "localhost",
                 self._state_ollama_port(),
+                asr_backend_from_label(self.asr_engine.get()),
+                self.app_root,
             )
         )
 

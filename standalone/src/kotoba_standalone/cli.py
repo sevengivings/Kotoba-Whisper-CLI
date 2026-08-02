@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from kotoba_standalone.alignment import (
@@ -8,7 +12,7 @@ from kotoba_standalone.alignment import (
     align_chunks_with_whisperx,
     write_alignment_metadata,
 )
-from kotoba_standalone.media import FFmpegAudioExtractionError, is_supported_media
+from kotoba_standalone.media import FFMPEG_PATH_ENV, FFmpegAudioExtractionError, is_supported_media
 from kotoba_standalone.pipeline import process_video, validate_silence_threshold
 from kotoba_standalone.progress import tqdm_progress
 from kotoba_standalone.settings import DEFAULT_TRANSLATION_MODEL, load_saved_translation_model, save_translation_model
@@ -27,14 +31,24 @@ from kotoba_standalone.types import ProcessOptions, ProcessResult, ProgressEvent
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command == "process":
-        return run_process(args)
-    if args.command == "translate":
-        return run_translate(args)
-    if args.command == "align":
-        return run_align(args)
-    parser.print_help()
-    return 1
+    old_ffmpeg_path = os.environ.get(FFMPEG_PATH_ENV)
+    ffmpeg_path_was_applied = apply_ffmpeg_path_arg(args)
+    try:
+        if args.command == "process" and args.asr_backend == "qwen3":
+            reexec_result = maybe_reexec_with_qwen_environment(argv)
+            if reexec_result is not None:
+                return reexec_result
+        if args.command == "process":
+            return run_process(args)
+        if args.command == "translate":
+            return run_translate(args)
+        if args.command == "align":
+            return run_align(args)
+        parser.print_help()
+        return 1
+    finally:
+        if ffmpeg_path_was_applied:
+            restore_ffmpeg_path_env(old_ffmpeg_path)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,11 +70,16 @@ def build_parser() -> argparse.ArgumentParser:
     process.add_argument("--vad-min-speech-duration-s", type=float, default=0.25)
     process.add_argument("--vad-padding-s", type=float, default=0.4)
     process.add_argument("--vad-merge-gap-s", type=float, default=0.0)
+    process.add_argument("--ffmpeg-path", help=argparse.SUPPRESS)
+    process.add_argument("--asr-backend", choices=("kotoba", "qwen3"), default="kotoba", help=argparse.SUPPRESS)
     process.add_argument("--batch-size", type=int, default=8)
     process.add_argument("--chunk-length-s", type=int, default=15)
     process.add_argument("--model-name", default="kotoba-tech/kotoba-whisper-v2.2")
     process.add_argument("--model-device", default="cuda:0")
     process.add_argument("--model-dtype", default="float16")
+    process.add_argument("--qwen-model-name", default="Qwen/Qwen3-ASR-1.7B", help=argparse.SUPPRESS)
+    process.add_argument("--qwen-aligner-model", default="Qwen/Qwen3-ForcedAligner-0.6B", help=argparse.SUPPRESS)
+    process.add_argument("--no-qwen-timestamps", dest="qwen_return_timestamps", action="store_false", help=argparse.SUPPRESS)
     process.add_argument("--report-subtitle-quality", action="store_true")
     process.add_argument("--drop-likely-hallucinations", action="store_true")
     process.add_argument("--split-long-subtitles", action="store_true")
@@ -103,6 +122,62 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def apply_ffmpeg_path_arg(args: argparse.Namespace) -> bool:
+    ffmpeg_path = getattr(args, "ffmpeg_path", None)
+    if ffmpeg_path:
+        os.environ[FFMPEG_PATH_ENV] = ffmpeg_path
+        return True
+    return False
+
+
+def restore_ffmpeg_path_env(old_ffmpeg_path: str | None) -> None:
+    if old_ffmpeg_path is None:
+        os.environ.pop(FFMPEG_PATH_ENV, None)
+    else:
+        os.environ[FFMPEG_PATH_ENV] = old_ffmpeg_path
+
+
+def maybe_reexec_with_qwen_environment(argv: list[str] | None) -> int | None:
+    if os.environ.get("KOTOBA_QWEN_REEXEC") == "1" or qwen_dependencies_available():
+        return None
+    qwen_python = qwen_environment_python()
+    if qwen_python is None:
+        print_error(
+            "Qwen3-ASR experimental environment was not found.\n"
+            "  Install it first:\n"
+            "    uv sync --group cuda --group pyannote --group qwen\n"
+            "  Korean guide: Qwen3 실험 환경(.venv-qwen)을 먼저 설치해 주세요."
+        )
+        return 1
+    command = [str(qwen_python), "-m", "kotoba_standalone.cli", *(argv if argv is not None else sys.argv[1:])]
+    env = os.environ.copy()
+    env["KOTOBA_QWEN_REEXEC"] = "1"
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    return subprocess.run(command, cwd=standalone_root(), env=env).returncode
+
+
+def qwen_dependencies_available() -> bool:
+    return importlib.util.find_spec("qwen_asr") is not None
+
+
+def qwen_environment_python() -> Path | None:
+    env_path = os.environ.get("KOTOBA_QWEN_PYTHON")
+    candidates = [Path(env_path).expanduser()] if env_path else []
+    root = standalone_root()
+    if sys.platform == "win32":
+        candidates.append(root / ".venv-qwen" / "Scripts" / "python.exe")
+    else:
+        candidates.append(root / ".venv-qwen" / "bin" / "python")
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def standalone_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
 def run_process(args: argparse.Namespace) -> int:
     input_path = args.input.expanduser().resolve()
     try:
@@ -131,11 +206,15 @@ def run_process(args: argparse.Namespace) -> int:
         vad_min_speech_duration_s=args.vad_min_speech_duration_s,
         vad_padding_s=args.vad_padding_s,
         vad_merge_gap_s=args.vad_merge_gap_s,
+        asr_backend=args.asr_backend,
         batch_size=args.batch_size,
         chunk_length_s=args.chunk_length_s,
         model_name=args.model_name,
         model_device=args.model_device,
         model_dtype=args.model_dtype,
+        qwen_model_name=args.qwen_model_name,
+        qwen_aligner_model=args.qwen_aligner_model,
+        qwen_return_timestamps=args.qwen_return_timestamps,
         report_subtitle_quality=args.report_subtitle_quality,
         drop_likely_hallucinations=args.drop_likely_hallucinations,
         split_long_subtitles=args.split_long_subtitles,

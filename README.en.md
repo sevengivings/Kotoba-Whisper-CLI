@@ -8,8 +8,8 @@ A local tool that extracts Japanese subtitles from media and can translate them 
 
 1. Install the NVIDIA graphics driver.
 2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
-3. Double-click `standalone\install-windows.bat`.
-4. Double-click `standalone\run-kotoba.bat` after setup finishes.
+3. Double-click `standalone\install-kotoba.bat`.
+4. Double-click `standalone\run-gui.bat` after setup finishes.
 5. Select a media file or folder and press `시작`.
 
 Python and ffmpeg do not need separate installations. uv manages Python, and the application uses a bundled ffmpeg binary. The NVIDIA driver is still required. Korean translation additionally requires [Ollama](https://ollama.com/download).

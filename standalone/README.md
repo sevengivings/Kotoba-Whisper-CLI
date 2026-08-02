@@ -12,11 +12,11 @@ standalone 버전은 동영상 파일을 직접 지정해서 일본어 자막을
 
 PowerShell 명령어가 부담스럽다면 아래 두 파일부터 사용하세요.
 
-1. `install-windows.bat`를 더블클릭합니다.
-2. 설치가 끝나면 `run-kotoba.bat`를 더블클릭합니다.
+1. `install-kotoba.bat`를 더블클릭합니다.
+2. 설치가 끝나면 `run-gui.bat`를 더블클릭합니다.
 3. 작은 창이 뜨면 영상 파일이나 폴더를 선택하고 `시작`을 누릅니다.
 
-`run-kotoba.bat`는 내부적으로 `kotoba-launcher`를 실행합니다. 런처에서는 입력 파일/폴더, 작업 폴더, 한국어 번역 여부와 Ollama 번역 모델을 화면에서 고를 수 있습니다. 음성 구간 검출은 번들된 pyannote를 자동으로 사용합니다. 실험적인 자막 품질 후처리는 CLI에서만 사용할 수 있습니다.
+`run-gui.bat`는 내부적으로 `kotoba-launcher`를 실행합니다. 런처에서는 입력 파일/폴더, 작업 폴더, 전사 엔진, 한국어 번역 여부와 Ollama 번역 모델을 화면에서 고를 수 있습니다. 음성 구간 검출은 번들된 pyannote를 자동으로 사용합니다. 실험적인 자막 품질 후처리는 CLI에서만 사용할 수 있습니다.
 
 명령어를 직접 쓰는 방법은 아래에 계속 정리해 두었습니다. 문제가 생겼을 때는 명령어 방식이 원인 파악에 더 편합니다.
 
@@ -131,7 +131,7 @@ uv run --no-sync kotoba process "D:\Videos" --output-dir ".\tmp-output"
 
 standalone은 배경 음악이나 지속적인 잡음에서도 사람 음성을 구분하기 위해 pyannote VAD를 기본으로 사용합니다.
 
-기본 `install-windows.bat`는 pyannote 의존성까지 함께 설치합니다. 기존 standalone 환경에 pyannote만 추가하려면 `install-pyannote-windows.bat`를 한 번 실행하거나 다음 명령을 사용합니다.
+기본 `install-kotoba.bat`는 pyannote 의존성까지 함께 설치합니다. 기존 standalone 환경에 pyannote만 추가하려면 개발자용 `tools\install-pyannote-windows.bat`를 한 번 실행하거나 다음 명령을 사용합니다.
 
 ```powershell
 uv sync --group transcribe --group cuda --group pyannote
@@ -195,6 +195,36 @@ uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-outpu
 ```
 
 `--annotate-subtitle-quality`는 SRT 텍스트에 `[quality: ...]` 줄을 실제로 추가하므로 Subtitle Edit이나 동영상 플레이어에서 검토할 때만 사용하세요. 번역까지 함께 실행하면 태그도 번역 입력에 들어갈 수 있습니다.
+
+### Qwen3-ASR 전사 실험
+
+Qwen3-ASR은 실험 백엔드입니다. Kotoba 기본값을 대체하지 않고, 같은 영상에서 전사 품질과 타임스탬프 품질을 비교할 때 사용합니다. `install-qwen3.bat` 설치 후 GUI의 `전사 엔진`에서 `Qwen3-ASR 1.7B (실험)`을 선택할 수 있습니다.
+
+먼저 `install-qwen3.bat`를 실행하거나, Qwen 의존성을 별도 `.venv-qwen` 환경에 직접 추가합니다.
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT=".venv-qwen"
+uv sync --group cuda --group pyannote --group qwen
+Remove-Item Env:\UV_PROJECT_ENVIRONMENT
+```
+
+`qwen-asr`가 요구하는 `transformers` 버전은 Kotoba 기본 전사용 `transcribe` 그룹과 다르므로, Qwen은 `.venv-qwen`에 분리하고 Qwen 실험 환경에서는 `--group transcribe`를 함께 지정하지 않습니다.
+
+Qwen3-ASR 1.7B와 Qwen3-ForcedAligner를 사용해 전사하려면:
+
+```powershell
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output" --asr-backend qwen3 --model-dtype bfloat16
+```
+
+`--asr-backend qwen3`를 사용하면 현재 환경에 `qwen-asr`가 없을 때 CLI가 자동으로 `.venv-qwen`의 Python으로 같은 명령을 다시 실행합니다. Qwen Python 경로를 직접 지정하려면 `KOTOBA_QWEN_PYTHON` 환경 변수를 사용합니다.
+
+기본 Qwen 설정은 다음과 같습니다.
+
+- ASR 모델: `Qwen/Qwen3-ASR-1.7B`
+- 강제정렬 모델: `Qwen/Qwen3-ForcedAligner-0.6B`
+- 결과 메타데이터: `*.process.json`의 `asr_backend`, `asr_model`, `qwen_aligner_model`
+
+VRAM이 부족하거나 속도 비교를 하고 싶다면 `--qwen-model-name Qwen/Qwen3-ASR-0.6B`를 지정해 볼 수 있습니다. 이 기능은 아직 일본어 AV 영상 기준 품질 검증 전이므로, 어려운 샘플에서 Kotoba 결과와 나란히 비교하는 용도입니다.
 
 ### WhisperX 싱크 보정 실험(CLI 전용)
 
@@ -339,7 +369,7 @@ ollama list
 ffmpeg -version
 ```
 
-PATH 설정이 어렵거나 특정 FFmpeg만 쓰고 싶다면 `run-kotoba.bat`의 아래 예시 줄에서 `REM `을 지우고 실제 경로로 바꾸세요.
+PATH 설정이 어렵거나 특정 FFmpeg만 쓰고 싶다면 `run-gui.bat`의 아래 예시 줄에서 `REM `을 지우고 실제 경로로 바꾸세요.
 
 ```bat
 REM set KOTOBA_FFMPEG_PATH=C:\Python\Faster-Whisper-XXL\ffmpeg.exe

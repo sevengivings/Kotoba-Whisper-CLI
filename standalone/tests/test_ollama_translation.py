@@ -19,6 +19,7 @@ from kotoba_standalone.translate.ollama import (
     make_batches,
     parse_batch_translation,
     resolve_output_srt,
+    source_based_translation_override,
     sort_ollama_models_for_translation,
     translation_model_label,
 )
@@ -90,6 +91,15 @@ def test_parse_batch_translation_splits_inline_numbered_lines() -> None:
 
 def test_clean_translated_subtitle_text_removes_leading_batch_labels() -> None:
     assert clean_translated_subtitle_text("[41] 이건 뭐예요?") == "이건 뭐예요?"
+
+
+def test_source_based_translation_override_keeps_short_un_as_eung() -> None:
+    assert source_based_translation_override("うん、") == "응"
+    assert source_based_translation_override("うん。") == "응"
+    assert source_based_translation_override(" うん ") == "응"
+    assert source_based_translation_override("うん、うん。") == "응"
+    assert source_based_translation_override("うん、うん、うん、うん、うん、うん、うん。") == "응"
+    assert source_based_translation_override("うん、いいよ。") is None
 
 
 def test_korean_prompt_can_request_strict_informal_style() -> None:

@@ -231,6 +231,7 @@ def translate_entries(
             _emit(progress, started, "translate", f"Translating subtitle {index}", index, len(texts))
             translated[index - 1] = translate_text_ollama(options, text)
 
+    apply_source_based_translation_overrides(texts, translated)
     validate_translations(translated)
     return translated
 
@@ -343,6 +344,26 @@ def validate_translations(translated_texts: list[str]) -> None:
     for index, text in enumerate(translated_texts, 1):
         if not text.strip():
             raise RuntimeError(f"Empty translation remains at subtitle {index}")
+
+
+def apply_source_based_translation_overrides(source_texts: list[str], translated_texts: list[str]) -> None:
+    for index, source_text in enumerate(source_texts):
+        override = source_based_translation_override(source_text)
+        if override is not None:
+            translated_texts[index] = override
+
+
+def source_based_translation_override(source_text: str) -> str | None:
+    if is_repeated_short_japanese_reaction(source_text, "うん"):
+        return "응"
+    return None
+
+
+def is_repeated_short_japanese_reaction(text: str, reaction: str) -> bool:
+    normalized = re.sub(r"[\s。、，,\.]+", " ", text.strip()).strip()
+    if not normalized:
+        return False
+    return all(part == reaction for part in normalized.split())
 
 
 def write_srt(path: Path, entries: list[dict[str, str]], translated_texts: list[str]) -> None:

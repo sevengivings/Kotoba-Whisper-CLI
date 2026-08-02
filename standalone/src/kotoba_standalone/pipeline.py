@@ -24,6 +24,7 @@ from kotoba_standalone.media import (
     wav_duration_seconds,
 )
 from kotoba_standalone.pyannote_vad import PyannoteVadError, detect_speech_spans_pyannote
+from kotoba_standalone.qwen_transcriber import Qwen3Transcriber
 from kotoba_standalone.progress import ProgressCallback
 from kotoba_standalone.subtitle import (
     analyze_subtitle_quality,
@@ -147,6 +148,8 @@ def process_video(
                     "model_revision": pyannote_vad.model_revision,
                     "device": pyannote_vad.device,
                     "pyannote_audio_version": pyannote_vad.pyannote_audio_version,
+                    "processed_audio_duration_s": pyannote_vad.processed_audio_duration_s,
+                    "chunk_duration_s": pyannote_vad.chunk_duration_s,
                     "min_speech_duration_s": options.vad_min_speech_duration_s,
                     "min_silence_duration_s": options.min_silence_duration_s,
                     "max_segment_duration_s": options.vad_max_segment_duration_s,
@@ -165,13 +168,13 @@ def process_video(
     elif options.vad_engine not in {"ffmpeg", "pyannote"}:
         raise ValueError(f"Unsupported VAD engine: {options.vad_engine}")
     if pyannote_no_speech:
-        _emit(progress, started, "load_model", "No speech found; skipping Kotoba model", 6, progress_total)
+        _emit(progress, started, "load_model", f"No speech found; skipping {options.asr_backend} model", 6, progress_total)
     else:
-        _emit(progress, started, "load_model", "Loading Kotoba model", 6, progress_total)
+        _emit(progress, started, "load_model", f"Loading {options.asr_backend} ASR model", 6, progress_total)
 
     transcriber = None
     if not pyannote_no_speech:
-        transcriber = KotobaTranscriber(options)
+        transcriber = create_transcriber(options)
         try:
             transcriber.load()
         except TranscriptionDependencyError as exc:
@@ -328,6 +331,10 @@ def process_video(
                 "torch_cuda_version": transcription.torch_cuda_version if transcription is not None else None,
                 "batch_size_used": transcription.batch_size_used if transcription is not None else None,
                 "word_timestamps_used": transcription.word_timestamps_used if transcription is not None else False,
+                "asr_backend": options.asr_backend,
+                "asr_model": options.qwen_model_name if options.asr_backend == "qwen3" else options.model_name,
+                "qwen_aligner_model": options.qwen_aligner_model if options.asr_backend == "qwen3" else None,
+                "qwen_return_timestamps": options.qwen_return_timestamps if options.asr_backend == "qwen3" else None,
                 "vad_engine": options.vad_engine,
                 "silence_threshold_db": silence_threshold_db if options.vad_engine == "ffmpeg" else None,
                 "min_silence_duration_s": options.min_silence_duration_s,
@@ -350,6 +357,8 @@ def process_video(
                         "model_revision": pyannote_vad.model_revision,
                         "device": pyannote_vad.device,
                         "pyannote_audio_version": pyannote_vad.pyannote_audio_version,
+                        "processed_audio_duration_s": pyannote_vad.processed_audio_duration_s,
+                        "chunk_duration_s": pyannote_vad.chunk_duration_s,
                     }
                     if pyannote_vad is not None
                     else None
@@ -549,6 +558,14 @@ def translation_options_from_process(options: ProcessOptions, output: Path | Non
         ollama_port=options.ollama_port,
         korean_style=options.korean_style,
     )
+
+
+def create_transcriber(options: ProcessOptions) -> KotobaTranscriber | Qwen3Transcriber:
+    if options.asr_backend == "kotoba":
+        return KotobaTranscriber(options)
+    if options.asr_backend == "qwen3":
+        return Qwen3Transcriber(options)
+    raise ValueError(f"Unsupported ASR backend: {options.asr_backend}")
 
 
 def _emit(

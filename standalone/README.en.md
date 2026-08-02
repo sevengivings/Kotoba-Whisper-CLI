@@ -12,11 +12,11 @@ For model and third-party distribution notices, see [THIRD_PARTY_NOTICES.md](../
 
 If command lines feel intimidating, use the two Windows helper files first:
 
-1. Double-click `install-windows.bat`.
-2. After setup finishes, double-click `run-kotoba.bat`.
+1. Double-click `install-kotoba.bat`.
+2. After setup finishes, double-click `run-gui.bat`.
 3. Pick a video file or folder in the small launcher window, then press `시작`.
 
-`run-kotoba.bat` starts `kotoba-launcher`. The launcher lets you choose the input, work folder, Korean translation, and Ollama translation model from a simple window. Speech detection automatically uses the bundled pyannote model. Experimental subtitle quality post-processing remains CLI-only.
+`run-gui.bat` starts `kotoba-launcher`. The launcher lets you choose the input, work folder, ASR engine, Korean translation, and Ollama translation model from a simple window. Speech detection automatically uses the bundled pyannote model. Experimental subtitle quality post-processing remains CLI-only.
 
 The command-line flow below is still useful for troubleshooting.
 
@@ -61,13 +61,13 @@ Pyannote VAD pre-split is enabled by default. It detects human speech spans, tra
 
 ### Default pyannote VAD
 
-`install-windows.bat` installs the pyannote dependencies. To add them to an existing environment manually:
+`install-kotoba.bat` installs the pyannote dependencies. To add them to an existing environment manually:
 
 ```powershell
 uv sync --group transcribe --group cuda --group pyannote
 ```
 
-The original `pyannote/segmentation-3.0` weights are bundled under the MIT license. The default model therefore needs no Hugging Face account, condition acceptance, token, or network download. The upstream `LICENSE`, model card, fixed revision `e66f3d3b9eb0873085418a7b813d3b369bf160bb`, and checksums are preserved in `src/kotoba_standalone/models/pyannote-segmentation-3.0`. Existing Windows installations can run `install-pyannote-windows.bat` to add the required Python dependencies.
+The original `pyannote/segmentation-3.0` weights are bundled under the MIT license. The default model therefore needs no Hugging Face account, condition acceptance, token, or network download. The upstream `LICENSE`, model card, fixed revision `e66f3d3b9eb0873085418a7b813d3b369bf160bb`, and checksums are preserved in `src/kotoba_standalone/models/pyannote-segmentation-3.0`. Existing Windows installations can run the developer helper `tools\install-pyannote-windows.bat` to add the required Python dependencies.
 
 ```powershell
 uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output"
@@ -107,6 +107,36 @@ uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-outpu
 ```
 
 `--annotate-subtitle-quality` writes `[quality: ...]` lines into the SRT body, so use it only for review. If translation is enabled, those tags may become part of the translation input.
+
+### Qwen3-ASR Experiment
+
+Qwen3-ASR is an experimental ASR backend. It does not replace the default Kotoba backend; use it to compare transcription and timestamp quality on the same media. After running `install-qwen3.bat`, select `Qwen3-ASR 1.7B (experimental)` from the GUI's ASR engine field.
+
+Run `install-qwen3.bat`, or install the optional Qwen dependencies into a separate `.venv-qwen` environment manually:
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT=".venv-qwen"
+uv sync --group cuda --group pyannote --group qwen
+Remove-Item Env:\UV_PROJECT_ENVIRONMENT
+```
+
+`qwen-asr` currently requires a different `transformers` version than the default Kotoba `transcribe` group, so keep Qwen in `.venv-qwen` and do not combine `--group transcribe` with the Qwen experiment environment.
+
+Run Qwen3-ASR 1.7B with the Qwen3 forced aligner:
+
+```powershell
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output" --asr-backend qwen3 --model-dtype bfloat16
+```
+
+When `--asr-backend qwen3` is used, the CLI automatically re-runs the same command with `.venv-qwen` if the current environment does not have `qwen-asr`. To use a custom Qwen Python path, set `KOTOBA_QWEN_PYTHON`.
+
+Default Qwen settings:
+
+- ASR model: `Qwen/Qwen3-ASR-1.7B`
+- Forced aligner: `Qwen/Qwen3-ForcedAligner-0.6B`
+- Metadata fields: `asr_backend`, `asr_model`, and `qwen_aligner_model` in `*.process.json`
+
+For lower VRAM or speed comparisons, try `--qwen-model-name Qwen/Qwen3-ASR-0.6B`. This backend still needs Japanese adult-video sample validation, so treat it as a comparison tool for now.
 
 ### WhisperX Alignment Experiment (CLI Only)
 
@@ -190,7 +220,7 @@ Download FFmpeg from [ffmpeg.org/download.html](https://ffmpeg.org/download.html
 ffmpeg -version
 ```
 
-If you prefer to pin a specific FFmpeg executable, edit `run-kotoba.bat` and remove `REM ` from this example line:
+If you prefer to pin a specific FFmpeg executable, edit `run-gui.bat` and remove `REM ` from this example line:
 
 ```bat
 REM set KOTOBA_FFMPEG_PATH=C:\Python\Faster-Whisper-XXL\ffmpeg.exe

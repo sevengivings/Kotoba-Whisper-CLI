@@ -7,10 +7,13 @@ from kotoba_standalone.pyannote_vad import (
     BUNDLED_PYANNOTE_MODEL_CHECKPOINT,
     DEFAULT_PYANNOTE_VAD_MODEL,
     PyannoteVadAccessError,
+    _chunk_frame_ranges,
+    _merge_overlapping_spans,
     _model_load_error,
     _progress_hook,
     _resolve_model_checkpoint,
 )
+from kotoba_standalone.media import SilenceSpan
 
 
 def test_model_load_error_explains_gated_model_access() -> None:
@@ -39,6 +42,29 @@ def test_progress_hook_clamps_batch_overshoot() -> None:
     hook("segmentation", None, completed=32, total=4)
 
     assert updates == [(4, 4)]
+
+
+def test_chunk_frame_ranges_cover_long_audio_with_overlap() -> None:
+    ranges = _chunk_frame_ranges(
+        total_frames=100,
+        sample_rate=10,
+        chunk_duration_s=4.0,
+        overlap_s=1.0,
+    )
+
+    assert ranges == [(0, 40), (30, 40), (60, 40)]
+
+
+def test_merge_overlapping_spans_combines_chunk_overlap() -> None:
+    spans = _merge_overlapping_spans(
+        [
+            SilenceSpan(30.0, 35.0),
+            SilenceSpan(34.98, 40.0),
+            SilenceSpan(50.0, 51.0),
+        ]
+    )
+
+    assert spans == [SilenceSpan(30.0, 40.0), SilenceSpan(50.0, 51.0)]
 
 
 def test_default_pyannote_model_uses_bundled_checkpoint() -> None:
