@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import os
+import shutil
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -118,20 +121,84 @@ def check_ollama_available(options: TranslationOptions) -> None:
 
 def get_ollama_models(options: TranslationOptions) -> list[str]:
     url = f"http://{options.ollama_host}:{options.ollama_port}/api/tags"
-    request = urllib.request.Request(url, method="GET")
     timeout = min(5, max(1, options.timeout_seconds))
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        data = _read_ollama_tags(url, timeout)
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-        raise OllamaUnavailableError(
-            f"Ollama is not reachable at {url}. Start Ollama first, then retry."
-        ) from exc
+        if _can_wake_ollama(options.ollama_host, options.ollama_port):
+            _wake_local_ollama()
+            try:
+                data = _read_ollama_tags_with_retries(url, timeout)
+            except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as retry_exc:
+                raise OllamaUnavailableError(
+                    f"Ollama is not reachable at {url}. "
+                    "Tried to start it with 'ollama list', but it did not respond. "
+                    "Start Ollama first, then retry."
+                ) from retry_exc
+        else:
+            raise OllamaUnavailableError(
+                f"Ollama is not reachable at {url}. Start Ollama first, then retry."
+            ) from exc
     models = [str(item.get("name", "")).strip() for item in data.get("models", []) if isinstance(item, dict)]
     models = [model for model in models if model]
     if not models:
         raise OllamaModelError(f"No Ollama models found at {url}. Run 'ollama pull <model>' first, then retry.")
     return models
+
+
+def _read_ollama_tags(url: str, timeout: int) -> dict[str, Any]:
+    request = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        raise json.JSONDecodeError("Ollama tags response must be an object", "", 0)
+    return data
+
+
+def _read_ollama_tags_with_retries(url: str, timeout: int) -> dict[str, Any]:
+    deadline = time.monotonic() + min(20, max(5, timeout))
+    last_error: Exception | None = None
+    while time.monotonic() <= deadline:
+        try:
+            return _read_ollama_tags(url, min(2, timeout))
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            last_error = exc
+            time.sleep(0.5)
+    if last_error is not None:
+        raise last_error
+    return _read_ollama_tags(url, timeout)
+
+
+def _can_wake_ollama(host: str, port: int) -> bool:
+    normalized_host = host.strip().lower()
+    return port == 11434 and normalized_host in {"", "localhost", "127.0.0.1", "::1"}
+
+
+def _wake_local_ollama() -> None:
+    command = _ollama_command()
+    if command is None:
+        return
+    try:
+        subprocess.Popen(
+            [str(command), "list"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except OSError:
+        return
+
+
+def _ollama_command() -> str | Path | None:
+    found = shutil.which("ollama")
+    if found:
+        return found
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidate = Path(local_app_data) / "Programs" / "Ollama" / "ollama.exe"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def is_likely_translation_model(model: str) -> bool:

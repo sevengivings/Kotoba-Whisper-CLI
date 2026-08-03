@@ -114,9 +114,11 @@ def test_check_ollama_available_reports_unreachable_server(monkeypatch: pytest.M
         raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr("urllib.request.urlopen", failing_urlopen)
+    monkeypatch.setattr("kotoba_standalone.translate.ollama._wake_local_ollama", lambda: None)
+    monkeypatch.setattr("kotoba_standalone.translate.ollama.time.sleep", lambda _seconds: None)
 
     with pytest.raises(OllamaUnavailableError, match="Ollama is not reachable"):
-        check_ollama_available(TranslationOptions(model="test"))
+        check_ollama_available(TranslationOptions(model="test", timeout_seconds=1))
 
 
 def test_get_ollama_models_parses_tags_response(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,6 +135,55 @@ def test_get_ollama_models_parses_tags_response(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: FakeResponse())
 
     assert get_ollama_models(TranslationOptions(model="a:model")) == ["a:model", "b:model"]
+
+
+def test_get_ollama_models_wakes_local_ollama_before_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"models":[{"name":"a:model"}]}'
+
+    calls = {"urlopen": 0, "wake": 0}
+
+    def urlopen_then_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        calls["urlopen"] += 1
+        if calls["urlopen"] == 1:
+            raise urllib.error.URLError("connection refused")
+        return FakeResponse()
+
+    def fake_wake() -> None:
+        calls["wake"] += 1
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen_then_success)
+    monkeypatch.setattr("kotoba_standalone.translate.ollama._wake_local_ollama", fake_wake)
+
+    assert get_ollama_models(TranslationOptions(model="a:model")) == ["a:model"]
+    assert calls == {"urlopen": 2, "wake": 1}
+
+
+def test_get_ollama_models_does_not_wake_remote_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"wake": 0}
+
+    def failing_urlopen(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise urllib.error.URLError("connection refused")
+
+    def fake_wake() -> None:
+        calls["wake"] += 1
+
+    monkeypatch.setattr("urllib.request.urlopen", failing_urlopen)
+    monkeypatch.setattr("kotoba_standalone.translate.ollama._wake_local_ollama", fake_wake)
+
+    with pytest.raises(OllamaUnavailableError):
+        get_ollama_models(TranslationOptions(model="a:model", ollama_host="ollama.local"))
+
+    assert calls["wake"] == 0
 
 
 def test_assert_ollama_model_available_reports_missing_model(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -29,6 +29,7 @@ from kotoba_standalone.settings import (
     save_launcher_state,
 )
 from kotoba_standalone.translate.ollama import (
+    OllamaModelError,
     OllamaUnavailableError,
     TranslationOptions,
     default_output_srt,
@@ -681,6 +682,7 @@ class KotobaLauncher:
         self.started_at: float | None = None
         self.last_result_paths: list[Path] = []
         self.pending_translation_copy: tuple[Path, Path, list[Path]] | None = None
+        self.ollama_lookup_running = False
         self.log_buffer = ""
         self.log_window: Toplevel | None = None
         self.log_widget: ScrolledText | None = None
@@ -746,10 +748,12 @@ class KotobaLauncher:
 
         ttk.Label(outer, text="번역 모델").grid(row=3, column=0, sticky="w", pady=form_pady)
         ttk.Entry(outer, textvariable=self.model).grid(row=3, column=1, sticky="ew", padx=8, pady=form_pady)
-        ttk.Button(outer, text="Ollama 모델", command=self.load_ollama_models).grid(
+        self.ollama_models_button = ttk.Button(outer, text="Ollama 모델", command=self.load_ollama_models)
+        self.ollama_models_button.grid(
             row=3, column=2, sticky="ew", padx=3, pady=form_pady
         )
-        ttk.Button(outer, text="Ollama 확인", command=self.check_ollama).grid(
+        self.ollama_check_button = ttk.Button(outer, text="Ollama 확인", command=self.check_ollama)
+        self.ollama_check_button.grid(
             row=3, column=3, sticky="ew", padx=3, pady=form_pady
         )
 
@@ -871,43 +875,73 @@ class KotobaLauncher:
             self._remember_state()
 
     def load_ollama_models(self) -> None:
+        self._start_ollama_lookup("models")
+
+    def check_ollama(self) -> None:
+        self._start_ollama_lookup("check")
+
+    def _start_ollama_lookup(self, action: str) -> None:
+        if self.ollama_lookup_running:
+            return
         ollama_port = self._ollama_port_or_warn()
         if ollama_port is None:
             return
-        try:
-            models = sort_ollama_models_for_translation(
-                get_ollama_models(
+        host = self.ollama_host.get().strip() or "localhost"
+        model = self.model.get() or DEFAULT_TRANSLATION_MODEL
+        self.ollama_status.set(f"{ollama_server_text(self.ollama_host.get(), ollama_port)} (확인 중... 필요 시 자동 시작)")
+        self.ollama_lookup_running = True
+        self._set_ollama_lookup_buttons("disabled")
+
+        def worker() -> None:
+            try:
+                models = get_ollama_models(
                     TranslationOptions(
-                        model=self.model.get() or DEFAULT_TRANSLATION_MODEL,
-                        ollama_host=self.ollama_host.get().strip() or "localhost",
+                        model=model,
+                        ollama_host=host,
                         ollama_port=ollama_port,
                     )
                 )
-            )
-        except OllamaUnavailableError as exc:
-            messagebox.showwarning("Ollama 연결 실패", str(exc))
+            except (OllamaModelError, OllamaUnavailableError) as exc:
+                self.root.after(
+                    0,
+                    lambda error=exc: self._finish_ollama_lookup(action, None, error, host, ollama_port),
+                )
+                return
+            except Exception as exc:
+                self.root.after(
+                    0,
+                    lambda error=exc: self._finish_ollama_lookup(action, None, error, host, ollama_port),
+                )
+                return
+            self.root.after(0, lambda result=models: self._finish_ollama_lookup(action, result, None, host, ollama_port))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_ollama_lookup(
+        self,
+        action: str,
+        models: list[str] | None,
+        error: Exception | None,
+        host: str,
+        port: int,
+    ) -> None:
+        self.ollama_lookup_running = False
+        self._set_ollama_lookup_buttons("normal")
+        if error is not None:
+            self.ollama_status.set(f"{ollama_server_text(host, port)} (연결 실패)")
+            messagebox.showwarning("Ollama 연결 실패", str(error))
             return
         if not models:
+            self.ollama_status.set(f"{ollama_server_text(host, port)} (모델 없음)")
             messagebox.showinfo("Ollama 모델", "다운로드된 Ollama 모델이 없습니다.")
             return
-        ModelDialog(self.root, models, self.model)
 
-    def check_ollama(self) -> None:
-        ollama_port = self._ollama_port_or_warn()
-        if ollama_port is None:
-            return
-        try:
-            models = get_ollama_models(
-                TranslationOptions(
-                    model=self.model.get() or DEFAULT_TRANSLATION_MODEL,
-                    ollama_host=self.ollama_host.get().strip() or "localhost",
-                    ollama_port=ollama_port,
-                )
-            )
-        except OllamaUnavailableError as exc:
-            messagebox.showwarning("Ollama 연결 실패", str(exc))
-            return
+        self.ollama_status.set(f"{ollama_server_text(host, port)} (연결됨, 모델 {len(models)}개)")
         sorted_models = sort_ollama_models_for_translation(models)
+        if action == "models":
+            ModelDialog(self.root, sorted_models, self.model)
+            return
+
         recommended = [model for model in sorted_models if format_ollama_model_choice(model).startswith("[번역 추천]")]
         discouraged = [model for model in sorted_models if format_ollama_model_choice(model).startswith("[실험용/비추천]")]
         lines = [
@@ -1325,6 +1359,10 @@ class KotobaLauncher:
         self.run_button.configure(state="normal")
         self._update_translate_button_state()
         self.stop_button.configure(state="disabled")
+
+    def _set_ollama_lookup_buttons(self, state: str) -> None:
+        self.ollama_models_button.configure(state=state)
+        self.ollama_check_button.configure(state=state)
 
     def _update_translate_button_state(self) -> None:
         if not hasattr(self, "translate_button"):
