@@ -117,6 +117,32 @@ def test_process_video_uses_qwen_backend_metadata(tmp_path: Path, monkeypatch: p
     assert process_meta["qwen_aligner_model"] == "Qwen/Qwen3-ForcedAligner-0.6B"
 
 
+def test_process_video_uses_faster_backend_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeFasterTranscriber:
+        def __init__(self, options: ProcessOptions) -> None:
+            self.options = options
+
+        def load(self) -> None:
+            return None
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            return FakeResult(text="こんにちは")
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, "FasterKotobaTranscriber", FakeFasterTranscriber)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
+
+    result = process_video(
+        media,
+        ProcessOptions(output_dir=tmp_path / "out", vad_engine="ffmpeg", asr_backend="faster-kotoba"),
+    )
+
+    assert result.status == "success"
+    process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
+    assert process_meta["asr_backend"] == "faster-kotoba"
+    assert process_meta["asr_model"] == "RoachLin/kotoba-whisper-v2.2-faster"
+
+
 def test_process_video_can_write_whisperx_aligned_subtitles(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

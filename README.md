@@ -14,6 +14,8 @@
 
 설치 배치 파일은 `uv`와 Python 3.12를 확인하고, 없으면 `winget`으로 설치합니다. Python 3.12 설치 전에는 사용자 확인을 한 번 받습니다. 프로그램은 패키지에 포함된 ffmpeg를 사용합니다. NVIDIA GPU가 있으면 CUDA 장치가 자동으로 표시되고, CUDA가 없으면 GUI는 CPU만 표시합니다. 한국어 번역을 사용하려면 [Ollama](https://ollama.com/download)가 추가로 필요합니다.
 
+CUDA가 없는 Windows PC에서는 GUI가 CPU용 `Kotoba-Whisper faster CPU` 백엔드를 사용합니다. 이 경로는 CTranslate2/faster-whisper 기반이라 CPU에서도 실행 가능하지만, GPU 전사보다 느립니다.
+
 자세한 설명은 [standalone 한국어 설치 및 사용 안내](standalone/README.md)를 참고하세요.
 
 ## 명령어로 실행

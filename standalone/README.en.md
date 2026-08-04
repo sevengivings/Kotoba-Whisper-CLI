@@ -20,6 +20,8 @@ If command lines feel intimidating, use the two Windows helper files first:
 
 The setup batch file checks for `uv` and Python 3.12 and installs them with `winget` when needed. It asks before installing Python 3.12. If CUDA is available, the processing-device selector shows the CUDA device; otherwise it shows CPU only. CPU transcription works but can be very slow.
 
+On Windows PCs without a CUDA device, the GUI automatically selects `Kotoba-Whisper faster CPU`. This backend uses CTranslate2/faster-whisper with `RoachLin/kotoba-whisper-v2.2-faster`. Existing CUDA systems continue to use the regular `Kotoba-Whisper v2.2` path.
+
 The command-line flow below is still useful for troubleshooting.
 
 ## Quick Setup

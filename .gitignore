@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 *.egg-info/
 /standalone/tmp-output*/
+/standalone/tmp-faster-output/
 /standalone/tmp-transcribe*/
 /standalone/build/
 /standalone/config/translation-defaults.json

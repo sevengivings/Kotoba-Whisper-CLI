@@ -9,11 +9,13 @@ import kotoba_standalone.launcher as launcher
 from kotoba_standalone.launcher import (
     LauncherOptions,
     LauncherTranslationOptions,
+    available_asr_backend_labels,
     asr_backend_from_label,
     asr_backend_label,
     available_model_devices,
     build_process_command,
     build_translate_command,
+    coerce_asr_backend,
     coerce_model_device,
     copy_korean_subtitles_to_input_location,
     default_app_for_extension,
@@ -76,11 +78,41 @@ def test_build_process_command_adds_qwen_backend(tmp_path: Path) -> None:
     assert command[command.index("--model-dtype") + 1] == "bfloat16"
 
 
+def test_build_process_command_adds_faster_backend(tmp_path: Path) -> None:
+    command = build_process_command(
+        LauncherOptions(
+            input_path=tmp_path / "sample.mp4",
+            output_dir=tmp_path / "out",
+            model_device="cpu",
+            asr_backend="faster-kotoba",
+        )
+    )
+
+    assert command[command.index("--asr-backend") + 1] == "faster-kotoba"
+    assert "--model-dtype" not in command
+
+
 def test_asr_backend_label_helpers() -> None:
     assert asr_backend_from_label("Qwen3-ASR 1.7B (실험)") == "qwen3"
+    assert asr_backend_from_label("Kotoba-Whisper faster CPU") == "faster-kotoba"
     assert asr_backend_from_label("Kotoba-Whisper v2.2") == "kotoba"
+    assert asr_backend_label("faster-kotoba") == "Kotoba-Whisper faster CPU"
     assert asr_backend_label("qwen3").startswith("Qwen3-ASR")
     assert asr_backend_label("unknown") == "Kotoba-Whisper v2.2"
+
+
+def test_available_asr_backend_labels_show_faster_only_without_cuda() -> None:
+    assert available_asr_backend_labels(("cpu",)) == ("Kotoba-Whisper faster CPU",)
+    assert available_asr_backend_labels(("cuda:0", "cpu")) == (
+        "Kotoba-Whisper v2.2",
+        "Qwen3-ASR 1.7B (실험)",
+    )
+
+
+def test_coerce_asr_backend_uses_faster_without_cuda() -> None:
+    assert coerce_asr_backend("kotoba", ("cpu",)) == "faster-kotoba"
+    assert coerce_asr_backend("faster-kotoba", ("cpu",)) == "faster-kotoba"
+    assert coerce_asr_backend("faster-kotoba", ("cuda:0", "cpu")) == "kotoba"
 
 
 def test_available_model_devices_returns_cpu_when_torch_missing(monkeypatch) -> None:

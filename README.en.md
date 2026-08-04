@@ -14,6 +14,8 @@ A local tool that extracts Japanese subtitles from media and can translate them 
 
 The setup batch file checks for `uv` and Python 3.12 and installs them with `winget` when needed. It asks before installing Python 3.12. The application uses a bundled ffmpeg binary. If CUDA is available, the launcher shows the CUDA device; otherwise it shows CPU only. Korean translation additionally requires [Ollama](https://ollama.com/download).
 
+On Windows PCs without CUDA, the GUI uses the CPU-oriented `Kotoba-Whisper faster CPU` backend. This path is based on CTranslate2/faster-whisper, so it can run on CPU, but it is still slower than GPU transcription.
+
 See the [standalone English guide](standalone/README.en.md) for detailed setup and usage.
 
 ## Command-Line Quick Start

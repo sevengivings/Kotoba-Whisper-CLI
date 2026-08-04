@@ -44,6 +44,12 @@ def test_process_parser_accepts_hidden_qwen_backend(tmp_path: Path) -> None:
     assert args.qwen_return_timestamps is True
 
 
+def test_process_parser_accepts_hidden_faster_backend(tmp_path: Path) -> None:
+    args = cli.build_parser().parse_args(["process", str(tmp_path / "a.mp4"), "--asr-backend", "faster-kotoba"])
+
+    assert args.asr_backend == "faster-kotoba"
+
+
 def test_qwen_backend_reports_missing_experiment_environment(tmp_path: Path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "qwen_dependencies_available", lambda: False)
     monkeypatch.setattr(cli, "qwen_environment_python", lambda: None)

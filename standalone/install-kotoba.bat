@@ -81,7 +81,7 @@ if exist ".venv\pyvenv.cfg" (
 
 echo.
 echo Installing Python packages. This can take a long time on the first run.
-"%UV_EXE%" sync --python "%PYTHON312%" --no-managed-python --no-python-downloads --group transcribe --group cuda --group pyannote
+"%UV_EXE%" sync --python "%PYTHON312%" --no-managed-python --no-python-downloads --group transcribe --group cuda --group pyannote --group faster
 if errorlevel 1 (
   echo.
   echo Python package installation failed.

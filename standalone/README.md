@@ -31,6 +31,8 @@ PowerShell 명령어가 부담스럽다면 아래 두 파일부터 사용하세�
 
 설치 배치 파일은 `uv`와 Python 3.12를 확인하고, 없으면 `winget`으로 설치합니다. Python 3.12 설치 전에는 사용자에게 한 번 확인합니다. NVIDIA CUDA GPU가 있으면 빠르게 처리할 수 있고, GPU가 없으면 GUI의 `처리 장치`에는 `cpu`만 표시됩니다. CPU 전사는 가능하지만 매우 느릴 수 있습니다.
 
+GPU가 없는 Windows PC의 GUI는 `Kotoba-Whisper faster CPU` 전사 엔진을 자동으로 선택합니다. 이 엔진은 CTranslate2/faster-whisper 기반이며, 기본 모델은 `RoachLin/kotoba-whisper-v2.2-faster`입니다. 기존 CUDA 환경에서는 기본 `Kotoba-Whisper v2.2` 경로를 그대로 사용합니다.
+
 ## 1. NVIDIA GPU 확인
 
 PowerShell을 열고 아래 명령을 실행합니다.

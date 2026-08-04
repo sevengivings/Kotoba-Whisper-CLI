@@ -37,7 +37,7 @@ if exist ".venv\pyvenv.cfg" (
 )
 
 echo Installing the optional pyannote VAD environment...
-"%UV_EXE%" sync --python "%PYTHON312%" --no-managed-python --no-python-downloads --group transcribe --group cuda --group pyannote
+"%UV_EXE%" sync --python "%PYTHON312%" --no-managed-python --no-python-downloads --group transcribe --group cuda --group pyannote --group faster
 if errorlevel 1 (
   echo.
   echo pyannote installation failed.

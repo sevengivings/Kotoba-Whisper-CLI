@@ -90,7 +90,7 @@ ren ".venv" ".venv-blocked-uv-python-%RANDOM%"
 :sync_packages
 echo.
 echo Python 패키지를 설치합니다. 처음 실행할 때는 시간이 오래 걸릴 수 있습니다.
-"%UV_EXE%" sync --python "%PYTHON312%" --no-managed-python --no-python-downloads --group transcribe --group cuda --group pyannote
+"%UV_EXE%" sync --python "%PYTHON312%" --no-managed-python --no-python-downloads --group transcribe --group cuda --group pyannote --group faster
 if not errorlevel 1 goto setup_done
 
 echo.

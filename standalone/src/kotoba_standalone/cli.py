@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     process.add_argument("--vad-padding-s", type=float, default=0.4)
     process.add_argument("--vad-merge-gap-s", type=float, default=0.0)
     process.add_argument("--ffmpeg-path", help=argparse.SUPPRESS)
-    process.add_argument("--asr-backend", choices=("kotoba", "qwen3"), default="kotoba", help=argparse.SUPPRESS)
+    process.add_argument("--asr-backend", choices=("kotoba", "faster-kotoba", "qwen3"), default="kotoba", help=argparse.SUPPRESS)
     process.add_argument("--batch-size", type=int, default=8)
     process.add_argument("--chunk-length-s", type=int, default=15)
     process.add_argument("--model-name", default="kotoba-tech/kotoba-whisper-v2.2")

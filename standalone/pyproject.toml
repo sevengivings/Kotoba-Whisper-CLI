@@ -34,6 +34,9 @@ pyannote = [
     "pyannote.audio==3.4.0",
     "speechbrain==1.0.3",
 ]
+faster = [
+    "faster-whisper==1.2.1",
+]
 qwen = [
     "qwen-asr>=0.0.6",
 ]

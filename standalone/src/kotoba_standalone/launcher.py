@@ -88,6 +88,8 @@ def build_process_command(options: LauncherOptions) -> list[str]:
         "--vad-engine",
         "pyannote",
     ]
+    if options.asr_backend == "faster-kotoba":
+        command.extend(["--asr-backend", "faster-kotoba"])
     if options.asr_backend == "qwen3":
         command.extend(["--asr-backend", "qwen3", "--model-dtype", "bfloat16"])
     if options.translate:
@@ -143,13 +145,30 @@ def coerce_model_device(device: str, available_devices: tuple[str, ...]) -> str:
 
 
 def asr_backend_from_label(label: str) -> str:
+    if "faster CPU" in label:
+        return "faster-kotoba"
     return "qwen3" if "Qwen3" in label else "kotoba"
 
 
 def asr_backend_label(value: str) -> str:
+    if value == "faster-kotoba":
+        return "Kotoba-Whisper faster CPU"
     if value == "qwen3":
         return "Qwen3-ASR 1.7B (실험)"
     return "Kotoba-Whisper v2.2"
+
+
+def available_asr_backend_labels(available_devices: tuple[str, ...]) -> tuple[str, ...]:
+    if any(device.startswith("cuda:") for device in available_devices):
+        return ("Kotoba-Whisper v2.2", "Qwen3-ASR 1.7B (실험)")
+    return ("Kotoba-Whisper faster CPU",)
+
+
+def coerce_asr_backend(backend: str, available_devices: tuple[str, ...]) -> str:
+    allowed = {asr_backend_from_label(label) for label in available_asr_backend_labels(available_devices)}
+    if backend in allowed:
+        return backend
+    return "faster-kotoba" if "faster-kotoba" in allowed else "kotoba"
 
 
 def build_translate_command(input_srt: Path, options: LauncherTranslationOptions) -> list[str]:
@@ -425,7 +444,7 @@ def launcher_state_from_values(
         "external_ffmpeg_path": ffmpeg_path,
         "ollama_host": ollama_host,
         "ollama_port": ollama_port,
-        "asr_backend": asr_backend if asr_backend in {"kotoba", "qwen3"} else "kotoba",
+        "asr_backend": asr_backend if asr_backend in {"kotoba", "faster-kotoba", "qwen3"} else "kotoba",
     }
 
 
@@ -715,6 +734,11 @@ class KotobaLauncher:
             str(state.get("last_model_device") or "cuda:0"),
             self.available_model_devices,
         )
+        initial_asr_backend = coerce_asr_backend(
+            str(state.get("asr_backend") or "kotoba"),
+            self.available_model_devices,
+        )
+        self.available_asr_backends = available_asr_backend_labels(self.available_model_devices)
 
         self.input_path = StringVar(value="")
         self.output_dir = StringVar(value=str(launcher_output_dir_from_state(state, self.app_root)))
@@ -722,7 +746,7 @@ class KotobaLauncher:
         self.model = StringVar(value=load_saved_translation_model() or DEFAULT_TRANSLATION_MODEL)
         self.korean_style = StringVar(value="polite")
         self.model_device = StringVar(value=initial_model_device)
-        self.asr_engine = StringVar(value=asr_backend_label(str(state.get("asr_backend") or "kotoba")))
+        self.asr_engine = StringVar(value=asr_backend_label(initial_asr_backend))
         self.external_ffmpeg_path = StringVar(value=str(state.get("external_ffmpeg_path") or ""))
         self.ollama_host = StringVar(value=str(state.get("ollama_host") or "localhost"))
         self.ollama_port = StringVar(value=str(state.get("ollama_port") or "11434"))
@@ -768,7 +792,7 @@ class KotobaLauncher:
         ttk.Combobox(
             outer,
             textvariable=self.asr_engine,
-            values=("Kotoba-Whisper v2.2", "Qwen3-ASR 1.7B (실험)"),
+            values=self.available_asr_backends,
             state="readonly",
             width=24,
         ).grid(row=2, column=1, sticky="w", padx=8, pady=form_pady)
