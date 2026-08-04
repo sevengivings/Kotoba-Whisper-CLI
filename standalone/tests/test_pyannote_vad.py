@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 from pathlib import Path
 
 from kotoba_standalone.pyannote_vad import (
@@ -115,6 +116,9 @@ def test_disable_matplotlib_imports_installs_plot_stubs() -> None:
     import matplotlib.pyplot as plt
     from torchmetrics.utilities.plot import plot_curve
 
+    assert importlib.util.find_spec("matplotlib") is not None
+    assert importlib.util.find_spec("matplotlib.pyplot") is not None
+    assert importlib.util.find_spec("torchmetrics.utilities.plot") is not None
     assert plt.Figure is object
     try:
         plot_curve()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import importlib.machinery
 import sys
 import types
 import warnings
@@ -345,6 +346,10 @@ def _install_matplotlib_stub() -> None:
     pyplot_stub = types.ModuleType("matplotlib.pyplot")
     axes_stub = types.ModuleType("matplotlib.axes")
     colors_stub = types.ModuleType("matplotlib.colors")
+    matplotlib_stub.__spec__ = importlib.machinery.ModuleSpec("matplotlib", loader=None, is_package=True)
+    pyplot_stub.__spec__ = importlib.machinery.ModuleSpec("matplotlib.pyplot", loader=None)
+    axes_stub.__spec__ = importlib.machinery.ModuleSpec("matplotlib.axes", loader=None)
+    colors_stub.__spec__ = importlib.machinery.ModuleSpec("matplotlib.colors", loader=None)
 
     axes_stub.Axes = object
     colors_stub.Colormap = object
@@ -371,6 +376,7 @@ def _install_torchmetrics_plot_stub() -> None:
     if "torchmetrics.utilities.plot" in sys.modules:
         return
     plot_stub = types.ModuleType("torchmetrics.utilities.plot")
+    plot_stub.__spec__ = importlib.machinery.ModuleSpec("torchmetrics.utilities.plot", loader=None)
     plot_stub._AX_TYPE = object
     plot_stub._CMAP_TYPE = object
     plot_stub._PLOT_OUT_TYPE = tuple[object, object]
