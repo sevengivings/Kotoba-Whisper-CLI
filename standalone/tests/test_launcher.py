@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import types
 from pathlib import Path
 
 import kotoba_standalone.launcher as launcher
@@ -10,8 +11,10 @@ from kotoba_standalone.launcher import (
     LauncherTranslationOptions,
     asr_backend_from_label,
     asr_backend_label,
+    available_model_devices,
     build_process_command,
     build_translate_command,
+    coerce_model_device,
     copy_korean_subtitles_to_input_location,
     default_app_for_extension,
     estimate_work_text,
@@ -78,6 +81,30 @@ def test_asr_backend_label_helpers() -> None:
     assert asr_backend_from_label("Kotoba-Whisper v2.2") == "kotoba"
     assert asr_backend_label("qwen3").startswith("Qwen3-ASR")
     assert asr_backend_label("unknown") == "Kotoba-Whisper v2.2"
+
+
+def test_available_model_devices_returns_cpu_when_torch_missing(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "torch", None)
+
+    assert available_model_devices() == ("cpu",)
+
+
+def test_available_model_devices_lists_cuda_devices(monkeypatch) -> None:
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            device_count=lambda: 2,
+        )
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    assert available_model_devices() == ("cuda:0", "cuda:1", "cpu")
+
+
+def test_coerce_model_device_falls_back_to_cpu() -> None:
+    assert coerce_model_device("cuda:0", ("cpu",)) == "cpu"
+    assert coerce_model_device("cuda:1", ("cuda:0", "cpu")) == "cpu"
+    assert coerce_model_device("cuda:0", ("cuda:0", "cpu")) == "cuda:0"
 
 
 def test_build_process_command_adds_translation_options(tmp_path: Path) -> None:

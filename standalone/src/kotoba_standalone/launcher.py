@@ -120,6 +120,28 @@ def qwen_environment_python() -> Path:
     return root / ".venv-qwen" / "bin" / "python"
 
 
+def available_model_devices() -> tuple[str, ...]:
+    devices = ["cpu"]
+    try:
+        import torch
+    except Exception:
+        return tuple(devices)
+    try:
+        if torch.cuda.is_available():
+            devices = [f"cuda:{index}" for index in range(torch.cuda.device_count())] + devices
+    except Exception:
+        return tuple(devices)
+    return tuple(devices)
+
+
+def coerce_model_device(device: str, available_devices: tuple[str, ...]) -> str:
+    if device in available_devices:
+        return device
+    if "cpu" in available_devices:
+        return "cpu"
+    return available_devices[0] if available_devices else "cpu"
+
+
 def asr_backend_from_label(label: str) -> str:
     return "qwen3" if "Qwen3" in label else "kotoba"
 
@@ -688,13 +710,18 @@ class KotobaLauncher:
         self.log_widget: ScrolledText | None = None
         self.app_root = standalone_root()
         state = load_launcher_state()
+        self.available_model_devices = available_model_devices()
+        initial_model_device = coerce_model_device(
+            str(state.get("last_model_device") or "cuda:0"),
+            self.available_model_devices,
+        )
 
         self.input_path = StringVar(value="")
         self.output_dir = StringVar(value=str(launcher_output_dir_from_state(state, self.app_root)))
         self.translate = BooleanVar(value=False)
         self.model = StringVar(value=load_saved_translation_model() or DEFAULT_TRANSLATION_MODEL)
         self.korean_style = StringVar(value="polite")
-        self.model_device = StringVar(value=str(state.get("last_model_device") or "cuda:0"))
+        self.model_device = StringVar(value=initial_model_device)
         self.asr_engine = StringVar(value=asr_backend_label(str(state.get("asr_backend") or "kotoba")))
         self.external_ffmpeg_path = StringVar(value=str(state.get("external_ffmpeg_path") or ""))
         self.ollama_host = StringVar(value=str(state.get("ollama_host") or "localhost"))
@@ -770,7 +797,8 @@ class KotobaLauncher:
         ttk.Combobox(
             outer,
             textvariable=self.model_device,
-            values=("cuda:0", "cpu"),
+            values=self.available_model_devices,
+            state="readonly",
             width=18,
         ).grid(row=5, column=1, sticky="w", padx=8, pady=form_pady)
 

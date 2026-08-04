@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import gc
+import sys
+import types
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -73,6 +75,7 @@ def detect_speech_spans_pyannote(
             warnings.filterwarnings("ignore", message="invalid escape sequence", category=SyntaxWarning)
             import torch
             import torchaudio
+            _disable_matplotlib_imports()
             import pyannote.audio
             from huggingface_hub import get_token
             from pyannote.audio import Model
@@ -309,3 +312,73 @@ def _access_error_message(model_name: str) -> str:
         f"Open {PYANNOTE_MODEL_URL}, accept the model conditions, then run "
         "'huggingface-cli login' or set HF_TOKEN before retrying."
     )
+
+
+class _DisabledPlotObject:
+    def __call__(self, *_args: Any, **_kwargs: Any) -> "_DisabledPlotObject":
+        return self
+
+    def __getattr__(self, _name: str) -> "_DisabledPlotObject":
+        return self
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(())
+
+    def __enter__(self) -> "_DisabledPlotObject":
+        return self
+
+    def __exit__(self, *_args: Any) -> None:
+        return None
+
+
+def _disable_matplotlib_imports() -> None:
+    """Avoid optional matplotlib imports that can trip Windows application control."""
+    _install_matplotlib_stub()
+    _install_torchmetrics_plot_stub()
+
+
+def _install_matplotlib_stub() -> None:
+    if "matplotlib" in sys.modules:
+        return
+    disabled = _DisabledPlotObject()
+    matplotlib_stub = types.ModuleType("matplotlib")
+    pyplot_stub = types.ModuleType("matplotlib.pyplot")
+    axes_stub = types.ModuleType("matplotlib.axes")
+    colors_stub = types.ModuleType("matplotlib.colors")
+
+    axes_stub.Axes = object
+    colors_stub.Colormap = object
+    pyplot_stub.Figure = object
+    pyplot_stub.style = disabled
+    pyplot_stub.subplots = disabled
+    pyplot_stub.figure = disabled
+    pyplot_stub.close = disabled
+    pyplot_stub.imshow = disabled
+    pyplot_stub.plot = disabled
+
+    matplotlib_stub.__version__ = "0.0"
+    matplotlib_stub.axes = axes_stub
+    matplotlib_stub.colors = colors_stub
+    matplotlib_stub.pyplot = pyplot_stub
+
+    sys.modules["matplotlib"] = matplotlib_stub
+    sys.modules["matplotlib.axes"] = axes_stub
+    sys.modules["matplotlib.colors"] = colors_stub
+    sys.modules["matplotlib.pyplot"] = pyplot_stub
+
+
+def _install_torchmetrics_plot_stub() -> None:
+    if "torchmetrics.utilities.plot" in sys.modules:
+        return
+    plot_stub = types.ModuleType("torchmetrics.utilities.plot")
+    plot_stub._AX_TYPE = object
+    plot_stub._CMAP_TYPE = object
+    plot_stub._PLOT_OUT_TYPE = tuple[object, object]
+
+    def _plot_disabled(*_args: Any, **_kwargs: Any) -> Any:
+        raise ModuleNotFoundError("Plotting is disabled for Kotoba VAD.")
+
+    plot_stub.plot_confusion_matrix = _plot_disabled
+    plot_stub.plot_curve = _plot_disabled
+    plot_stub.plot_single_or_multi_val = _plot_disabled
+    sys.modules["torchmetrics.utilities.plot"] = plot_stub

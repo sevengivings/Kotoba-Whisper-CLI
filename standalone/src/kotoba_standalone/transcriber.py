@@ -58,16 +58,24 @@ class KotobaTranscriber:
             ) from exc
 
         transformers_logging.set_verbosity_error()
-        if not torch.cuda.is_available():
-            raise TranscriptionDependencyError("CUDA is not available. Standalone transcription currently requires NVIDIA CUDA.")
-
         self._torch = torch
-        device_index = _parse_cuda_device(self.options.model_device)
-        self.device_name = torch.cuda.get_device_name(device_index)
+        model_device = self.options.model_device.strip() or "cuda:0"
+        if model_device.startswith("cuda:"):
+            if not torch.cuda.is_available():
+                raise TranscriptionDependencyError(
+                    f"Selected processing device is {model_device}, but CUDA is not available. "
+                    "Choose 'cpu' in the processing device setting, then retry."
+                )
+            device_index = _parse_cuda_device(model_device)
+            self.device_name = torch.cuda.get_device_name(device_index)
+        elif model_device == "cpu":
+            self.device_name = "cpu"
+        else:
+            raise TranscriptionDependencyError(f"Unsupported processing device: {model_device}")
         self.torch_version = torch.__version__
         self.torch_cuda_version = torch.version.cuda
 
-        dtype = torch.float16 if self.options.model_dtype == "float16" else torch.float32
+        dtype = torch.float32 if model_device == "cpu" else torch.float16 if self.options.model_dtype == "float16" else torch.float32
         processor = AutoProcessor.from_pretrained(self.options.model_name)
         processor.feature_extractor.return_attention_mask = True
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
@@ -77,14 +85,14 @@ class KotobaTranscriber:
         )
         model.generation_config.forced_decoder_ids = None
         model.generation_config.return_legacy_cache = True
-        model.to(self.options.model_device)
+        model.to(model_device)
         self._pipe = pipeline(
             task="automatic-speech-recognition",
             model=model,
             tokenizer=processor.tokenizer,
             feature_extractor=processor.feature_extractor,
             torch_dtype=dtype,
-            device=self.options.model_device,
+            device=model_device,
             batch_size=self.options.batch_size,
         )
 
@@ -113,7 +121,8 @@ class KotobaTranscriber:
                 )
             except RuntimeError as exc:
                 if is_cuda_oom(exc):
-                    self._torch.cuda.empty_cache()
+                    if self._torch.cuda.is_available():
+                        self._torch.cuda.empty_cache()
                     continue
                 raise
         raise RuntimeError("GPU memory exhausted for all fallback batch sizes")

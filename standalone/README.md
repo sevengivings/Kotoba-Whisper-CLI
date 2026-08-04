@@ -12,7 +12,7 @@ standalone 버전은 동영상 파일을 직접 지정해서 일본어 자막을
 
 PowerShell 명령어가 부담스럽다면 아래 두 파일부터 사용하세요.
 
-1. `install-kotoba.bat`를 더블클릭합니다.
+1. 한국어 메시지를 보려면 `install-kotoba-kor.bat`, 영어 메시지도 괜찮으면 `install-kotoba.bat`를 더블클릭합니다.
 2. 설치가 끝나면 `run-gui.bat`를 더블클릭합니다.
 3. 작은 창이 뜨면 영상 파일이나 폴더를 선택하고 `시작`을 누릅니다.
 
@@ -29,7 +29,7 @@ PowerShell 명령어가 부담스럽다면 아래 두 파일부터 사용하세�
 3. 자막 번역에 사용할 Ollama
 4. 이 프로젝트의 standalone Python 환경
 
-자막 추출은 현재 NVIDIA CUDA GPU가 있는 Windows 11 또는 Linux를 기준으로 합니다. GPU가 없거나 CUDA가 잡히지 않으면 오디오 추출까지만 되고 전사는 실행되지 않습니다.
+설치 배치 파일은 `uv`와 Python 3.12를 확인하고, 없으면 `winget`으로 설치합니다. Python 3.12 설치 전에는 사용자에게 한 번 확인합니다. NVIDIA CUDA GPU가 있으면 빠르게 처리할 수 있고, GPU가 없으면 GUI의 `처리 장치`에는 `cpu`만 표시됩니다. CPU 전사는 가능하지만 매우 느릴 수 있습니다.
 
 ## 1. NVIDIA GPU 확인
 
@@ -46,7 +46,7 @@ nvidia-smi
 Windows에서는 PowerShell에서 아래 명령을 실행합니다.
 
 ```powershell
-winget install --id Astral.UV -e
+winget install --id astral-sh.uv -e
 ```
 
 설치 후 새 PowerShell을 열고 확인합니다.
@@ -70,7 +70,7 @@ cd C:\Python\Kotoba-Whisper-CLI\standalone
 처음 한 번만 실행합니다.
 
 ```powershell
-uv sync --group transcribe --group cuda --group pyannote
+uv sync --python "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" --no-managed-python --no-python-downloads --group transcribe --group cuda --group pyannote
 ```
 
 다운로드가 오래 걸릴 수 있습니다. PyTorch와 CUDA 관련 파일이 크기 때문입니다.
@@ -78,14 +78,16 @@ uv sync --group transcribe --group cuda --group pyannote
 설치가 끝나면 도움말이 보이는지 확인합니다.
 
 ```powershell
-uv run --group transcribe --group cuda kotoba --help
+uv run --no-sync kotoba --help
 ```
 
 GUI 런처를 열려면:
 
 ```powershell
-uv run --group transcribe --group cuda kotoba-launcher
+uv run --no-sync kotoba-launcher
 ```
+
+Windows Smart App Control이 켜져 있으면 새로 내려받은 Python 패키지의 `.dll` 또는 `.pyd` 파일이 차단될 수 있습니다. 이 경우 관리자 권한 실행만으로 해결되지 않을 수 있으며, Windows 보안의 Smart App Control 설정을 확인해야 합니다.
 
 ## 5. 짧은 샘플로 자막 추출 테스트
 
@@ -347,7 +349,7 @@ NVIDIA 드라이버가 설치되지 않았거나 PATH가 잡히지 않은 상태
 
 ### `uv` 명령을 찾을 수 없습니다
 
-PowerShell을 새로 열어 보세요. 그래도 안 되면 `winget install --id Astral.UV -e`를 다시 실행하세요.
+PowerShell을 새로 열어 보세요. 그래도 안 되면 `winget install --id astral-sh.uv -e`를 다시 실행하세요.
 
 ### Ollama가 꺼져 있다고 나옵니다
 

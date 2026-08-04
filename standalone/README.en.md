@@ -18,30 +18,40 @@ If command lines feel intimidating, use the two Windows helper files first:
 
 `run-gui.bat` starts `kotoba-launcher`. The launcher lets you choose the input, work folder, ASR engine, Korean translation, and Ollama translation model from a simple window. Speech detection automatically uses the bundled pyannote model. Experimental subtitle quality post-processing remains CLI-only.
 
+The setup batch file checks for `uv` and Python 3.12 and installs them with `winget` when needed. It asks before installing Python 3.12. If CUDA is available, the processing-device selector shows the CUDA device; otherwise it shows CPU only. CPU transcription works but can be very slow.
+
 The command-line flow below is still useful for troubleshooting.
 
 ## Quick Setup
 
-Install `uv`, then run from this folder:
+After running the installer, check the CLI from this folder:
 
 ```powershell
-uv run kotoba --help
+uv run --no-sync kotoba --help
 ```
 
 `ffmpeg` does not need to be installed separately. The standalone CLI uses the binary bundled by `imageio-ffmpeg`.
 
-For transcription on NVIDIA CUDA:
+For transcription:
 
 ```powershell
-uv sync --group transcribe --group cuda --group pyannote
 uv run --no-sync kotoba process "..\sample\ja_short_test.mp4" --output-dir ".\tmp-output"
 ```
 
 To open the launcher from a terminal:
 
 ```powershell
-uv run --group transcribe --group cuda kotoba-launcher
+uv run --no-sync kotoba-launcher
 ```
+
+For the same interpreter selection used by the Windows installer, run:
+
+```powershell
+uv sync --python "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" --no-managed-python --no-python-downloads --group transcribe --group cuda --group pyannote
+uv run --no-sync kotoba-launcher
+```
+
+If Windows Smart App Control is enabled, it can block newly downloaded Python package `.dll` or `.pyd` files. Running as administrator may not bypass that policy; check Smart App Control in Windows Security if imports fail with an application-control message.
 
 ## Processing
 

@@ -7,12 +7,12 @@
 ## 가장 쉬운 Windows 사용 방법
 
 1. NVIDIA 그래픽카드 드라이버를 설치합니다.
-2. [uv](https://docs.astral.sh/uv/getting-started/installation/)를 설치합니다.
-3. `standalone\install-kotoba.bat`를 더블클릭합니다.
+2. `standalone\install-kotoba-kor.bat` 또는 `standalone\install-kotoba.bat`를 더블클릭합니다.
+3. Python 3.12가 없다는 안내가 나오면 설치 여부를 확인하고 `Y`를 누릅니다.
 4. 설치가 끝나면 `standalone\run-gui.bat`를 더블클릭합니다.
 5. 화면에서 영상 파일 또는 폴더를 선택하고 `시작`을 누릅니다.
 
-Python과 ffmpeg를 별도로 설치할 필요는 없습니다. uv가 Python 환경을 관리하고, 프로그램은 패키지에 포함된 ffmpeg를 사용합니다. NVIDIA 드라이버는 사용자가 설치해야 하며, 한국어 번역을 사용하려면 [Ollama](https://ollama.com/download)가 추가로 필요합니다.
+설치 배치 파일은 `uv`와 Python 3.12를 확인하고, 없으면 `winget`으로 설치합니다. Python 3.12 설치 전에는 사용자 확인을 한 번 받습니다. 프로그램은 패키지에 포함된 ffmpeg를 사용합니다. NVIDIA GPU가 있으면 CUDA 장치가 자동으로 표시되고, CUDA가 없으면 GUI는 CPU만 표시합니다. 한국어 번역을 사용하려면 [Ollama](https://ollama.com/download)가 추가로 필요합니다.
 
 자세한 설명은 [standalone 한국어 설치 및 사용 안내](standalone/README.md)를 참고하세요.
 

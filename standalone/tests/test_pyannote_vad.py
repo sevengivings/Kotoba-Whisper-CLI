@@ -8,6 +8,7 @@ from kotoba_standalone.pyannote_vad import (
     DEFAULT_PYANNOTE_VAD_MODEL,
     PyannoteVadAccessError,
     _chunk_frame_ranges,
+    _disable_matplotlib_imports,
     _merge_overlapping_spans,
     _model_load_error,
     _progress_hook,
@@ -106,3 +107,18 @@ def test_trusted_checkpoint_load_compat_forces_full_checkpoint_load() -> None:
 
     assert calls == [False]
     assert FakeTorch.load is original_load
+
+
+def test_disable_matplotlib_imports_installs_plot_stubs() -> None:
+    _disable_matplotlib_imports()
+
+    import matplotlib.pyplot as plt
+    from torchmetrics.utilities.plot import plot_curve
+
+    assert plt.Figure is object
+    try:
+        plot_curve()
+    except ModuleNotFoundError as exc:
+        assert "Plotting is disabled" in str(exc)
+    else:
+        raise AssertionError("plot_curve should be disabled")
