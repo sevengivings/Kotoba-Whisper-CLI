@@ -661,7 +661,14 @@ def configure_theme(root: Tk) -> None:
     style.configure("TLabel", background=background, foreground=text)
     style.configure("Panel.TLabel", background=panel, foreground=text)
     style.configure("Muted.TLabel", background=background, foreground=muted)
+    style.configure("DisabledField.TLabel", background=background, foreground="#9aa3af")
     style.configure("TCheckbutton", background=background, foreground=text)
+    style.map(
+        "TCheckbutton",
+        background=[("active", background), ("disabled", background)],
+        foreground=[("disabled", "#9aa3af")],
+        indicatorbackground=[("disabled", background)],
+    )
     style.configure("TLabelframe", background=panel, bordercolor=border, lightcolor=border, darkcolor=border, padding=(12, 10))
     style.configure("TLabelframe.Label", background=background, foreground=text, padding=(2, 0))
     style.configure(
@@ -703,10 +710,10 @@ def configure_theme(root: Tk) -> None:
     )
     style.map(
         "TCombobox",
-        fieldbackground=[("readonly", "#ffffff"), ("focus", "#ffffff")],
-        foreground=[("readonly", text), ("focus", text)],
-        selectbackground=[("readonly", "#ffffff"), ("focus", "#ffffff")],
-        selectforeground=[("readonly", text), ("focus", text)],
+        fieldbackground=[("disabled", "#f8fafc"), ("readonly", "#ffffff"), ("focus", "#ffffff")],
+        foreground=[("disabled", "#9aa3af"), ("readonly", text), ("focus", text)],
+        selectbackground=[("disabled", "#f8fafc"), ("readonly", "#ffffff"), ("focus", "#ffffff")],
+        selectforeground=[("disabled", "#9aa3af"), ("readonly", text), ("focus", text)],
     )
     style.configure("Horizontal.TProgressbar", background=accent, troughcolor="#e6eaf0", bordercolor="#e6eaf0")
     root.configure(background=background)
@@ -724,6 +731,7 @@ class KotobaLauncher:
         self.last_result_paths: list[Path] = []
         self.pending_translation_copy: tuple[Path, Path, list[Path]] | None = None
         self.ollama_lookup_running = False
+        self.verified_translation_models: set[str] = set()
         self.log_buffer = ""
         self.log_window: Toplevel | None = None
         self.log_widget: ScrolledText | None = None
@@ -761,6 +769,7 @@ class KotobaLauncher:
 
         self._build_ui()
         self.translate.trace_add("write", lambda *_args: self._refresh_derived_status())
+        self.model.trace_add("write", lambda *_args: self._refresh_translation_controls())
         self.input_path.trace_add("write", lambda *_args: self._refresh_derived_status())
         self.output_dir.trace_add("write", lambda *_args: self._refresh_derived_status())
         self.model_device.trace_add("write", lambda *_args: self._remember_state())
@@ -797,8 +806,10 @@ class KotobaLauncher:
             width=24,
         ).grid(row=2, column=1, sticky="w", padx=8, pady=form_pady)
 
-        ttk.Label(outer, text="번역 모델").grid(row=3, column=0, sticky="w", pady=form_pady)
-        ttk.Entry(outer, textvariable=self.model).grid(row=3, column=1, sticky="ew", padx=8, pady=form_pady)
+        self.translation_model_label = ttk.Label(outer, text="번역 모델")
+        self.translation_model_label.grid(row=3, column=0, sticky="w", pady=form_pady)
+        self.translation_model_entry = ttk.Entry(outer, textvariable=self.model)
+        self.translation_model_entry.grid(row=3, column=1, sticky="ew", padx=8, pady=form_pady)
         self.ollama_models_button = ttk.Button(outer, text="Ollama 모델", command=self.load_ollama_models)
         self.ollama_models_button.grid(
             row=3, column=2, sticky="ew", padx=3, pady=form_pady
@@ -808,14 +819,16 @@ class KotobaLauncher:
             row=3, column=3, sticky="ew", padx=3, pady=form_pady
         )
 
-        ttk.Label(outer, text="한국어 말투").grid(row=4, column=0, sticky="w", pady=form_pady)
-        ttk.Combobox(
+        self.korean_style_label = ttk.Label(outer, text="한국어 말투")
+        self.korean_style_label.grid(row=4, column=0, sticky="w", pady=form_pady)
+        self.korean_style_box = ttk.Combobox(
             outer,
             textvariable=self.korean_style,
             values=("polite", "banmal", "strict-banmal"),
             state="readonly",
             width=18,
-        ).grid(row=4, column=1, sticky="w", padx=8, pady=form_pady)
+        )
+        self.korean_style_box.grid(row=4, column=1, sticky="w", padx=8, pady=form_pady)
 
         ttk.Label(outer, text="처리 장치").grid(row=5, column=0, sticky="w", pady=form_pady)
         ttk.Combobox(
@@ -829,7 +842,8 @@ class KotobaLauncher:
         buttons = ttk.Frame(outer)
         buttons.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(10, 8))
         buttons.columnconfigure(0, weight=1)
-        ttk.Checkbutton(buttons, text="한국어 번역까지 실행", variable=self.translate).grid(row=0, column=1, padx=(0, 12))
+        self.translate_checkbutton = ttk.Checkbutton(buttons, text="한국어 번역까지 실행", variable=self.translate)
+        self.translate_checkbutton.grid(row=0, column=1, padx=(0, 12))
         self.run_button = ttk.Button(buttons, text="시작", command=self.start, style="Accent.TButton")
         self.run_button.grid(row=0, column=2, padx=4)
         self.translate_button = ttk.Button(buttons, text="번역", command=self.translate_existing)
@@ -895,6 +909,7 @@ class KotobaLauncher:
         ttk.Button(status_actions, text="주소/포트 변경", command=self.change_ollama_server).grid(
             row=1, column=0, sticky="ew", pady=2
         )
+        self._refresh_translation_controls()
 
     def choose_file(self) -> None:
         selected = filedialog.askopenfilename(
@@ -943,6 +958,7 @@ class KotobaLauncher:
         self.ollama_status.set(f"{ollama_server_text(self.ollama_host.get(), ollama_port)} (확인 중... 필요 시 자동 시작)")
         self.ollama_lookup_running = True
         self._set_ollama_lookup_buttons("disabled")
+        self._refresh_translation_controls()
 
         def worker() -> None:
             try:
@@ -980,16 +996,22 @@ class KotobaLauncher:
         self.ollama_lookup_running = False
         self._set_ollama_lookup_buttons("normal")
         if error is not None:
+            self.verified_translation_models.clear()
+            self._refresh_translation_controls()
             self.ollama_status.set(f"{ollama_server_text(host, port)} (연결 실패)")
             messagebox.showwarning("Ollama 연결 실패", str(error))
             return
         if not models:
+            self.verified_translation_models.clear()
+            self._refresh_translation_controls()
             self.ollama_status.set(f"{ollama_server_text(host, port)} (모델 없음)")
             messagebox.showinfo("Ollama 모델", "다운로드된 Ollama 모델이 없습니다.")
             return
 
         self.ollama_status.set(f"{ollama_server_text(host, port)} (연결됨, 모델 {len(models)}개)")
         sorted_models = sort_ollama_models_for_translation(models)
+        self.verified_translation_models = set(sorted_models)
+        self._refresh_translation_controls()
         if action == "models":
             ModelDialog(self.root, sorted_models, self.model)
             return
@@ -1022,6 +1044,9 @@ class KotobaLauncher:
             return
         ollama_port = self._ollama_port_or_warn()
         if ollama_port is None:
+            return
+        if self.translate.get() and not self._translation_controls_ready():
+            messagebox.showwarning("Ollama 확인 필요", "Ollama 번역 모델을 먼저 확인하거나 선택해 주세요.")
             return
         asr_backend = asr_backend_from_label(self.asr_engine.get())
         if asr_backend == "qwen3" and not qwen_environment_python().exists():
@@ -1073,6 +1098,9 @@ class KotobaLauncher:
             return
         ollama_port = self._ollama_port_or_warn()
         if ollama_port is None:
+            return
+        if not self._translation_controls_ready():
+            messagebox.showwarning("Ollama 확인 필요", "Ollama 번역 모델을 먼저 확인하거나 선택해 주세요.")
             return
         existing_outputs = existing_korean_subtitles(srt_paths, output_dir)
         if existing_outputs:
@@ -1295,6 +1323,8 @@ class KotobaLauncher:
 
     def _refresh_ollama_status(self) -> None:
         self.ollama_status.set(ollama_server_text(self.ollama_host.get(), self.ollama_port.get()))
+        self.verified_translation_models.clear()
+        self._refresh_translation_controls()
         self._remember_state()
 
     def _refresh_qwen_status(self) -> None:
@@ -1405,10 +1435,12 @@ class KotobaLauncher:
     def _set_running_buttons(self) -> None:
         self.run_button.configure(state="disabled")
         self.translate_button.configure(state="disabled")
+        self.translate_checkbutton.configure(state="disabled")
         self.stop_button.configure(state="normal")
 
     def _set_idle_buttons(self) -> None:
         self.run_button.configure(state="normal")
+        self._refresh_translation_controls()
         self._update_translate_button_state()
         self.stop_button.configure(state="disabled")
 
@@ -1416,11 +1448,33 @@ class KotobaLauncher:
         self.ollama_models_button.configure(state=state)
         self.ollama_check_button.configure(state=state)
 
+    def _translation_controls_ready(self) -> bool:
+        model = self.model.get().strip()
+        return bool(model and model in self.verified_translation_models)
+
+    def _refresh_translation_controls(self) -> None:
+        if not hasattr(self, "translate_checkbutton"):
+            return
+        ready = self._translation_controls_ready()
+        disabled = self.process is not None or self.started_at is not None or not ready
+        if disabled:
+            self.translate.set(False)
+        self.translate_checkbutton.configure(state="normal" if ready and self.process is None and self.started_at is None else "disabled")
+        self.translation_model_entry.configure(state="normal" if ready else "disabled")
+        self.korean_style_box.configure(state="readonly" if ready else "disabled")
+        label_style = "TLabel" if ready else "DisabledField.TLabel"
+        self.translation_model_label.configure(style=label_style)
+        self.korean_style_label.configure(style=label_style)
+        self._update_translate_button_state()
+
     def _update_translate_button_state(self) -> None:
         if not hasattr(self, "translate_button"):
             return
         if self.process is not None or self.started_at is not None:
             self.translate_button.configure(state="disabled")
+            return
+        if not self._translation_controls_ready():
+            self.translate_button.configure(state="disabled", text="번역")
             return
         input_text = self.input_path.get().strip()
         output_text = self.output_dir.get().strip()

@@ -35,6 +35,7 @@ The upstream license, model card, revision, and checksums are preserved in the [
 | Edition | Recommended for | Description |
 | --- | --- | --- |
 | [Standalone](standalone/README.en.md) | New users | Direct uv workflow with Windows GUI and CLI |
+| [Standalone Silicon](standalone-silicon/README.en.md) | Apple Silicon Mac users | Experimental macOS M1+ workflow; GUI uses Kotoba-Whisper v2.2 MLX + pyannote MPS |
 | [Docker](docker/README.md) | Existing watcher users | Pyannote-default `input` folder watcher workflow |
 
 Docker code, scripts, configuration, data directories, and model cache all live in `docker/`.

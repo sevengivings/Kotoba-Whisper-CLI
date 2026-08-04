@@ -1,6 +1,7 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+.DS_Store
 .venv/
 *.egg-info/
 /standalone/tmp-output*/
@@ -9,6 +10,13 @@ __pycache__/
 /standalone/build/
 /standalone/config/translation-defaults.json
 /standalone/config/launcher-state.json
+/standalone-silicon/tmp-output*/
+/standalone-silicon/tmp-faster-output/
+/standalone-silicon/tmp-transcribe*/
+/standalone-silicon/build/
+/standalone-silicon/config/translation-defaults.json
+/standalone-silicon/config/launcher-state.json
+/standalone-silicon/models/
 /docker/input/*
 /docker/processing/*
 /docker/output/*

@@ -53,6 +53,7 @@ uv run --no-sync kotoba process "D:\Videos\sample.mp4" --translate --translation
 | 버전 | 권장 대상 | 설명 |
 | --- | --- | --- |
 | [standalone](standalone/README.md) | 새 사용자 | uv 기반 직접 실행, Windows GUI와 CLI 제공 |
+| [standalone-silicon](standalone-silicon/README.md) | Apple Silicon Mac 사용자 | macOS M1 이상 실험판, GUI는 Kotoba-Whisper v2.2 MLX + pyannote MPS |
 | [Docker](docker/README.md) | 기존 watcher 사용자 | pyannote 기본, `input` 폴더 감시 방식 |
 
 Docker 버전의 코드, 실행 스크립트, 설정, 데이터 폴더는 모두 `docker/`에 있습니다.
@@ -60,7 +61,8 @@ Docker 버전의 코드, 실행 스크립트, 설정, 데이터 폴더는 모두
 ## 프로젝트 구조
 
 ```text
-standalone/   권장 uv 기반 버전
+standalone/   권장 uv 기반 Windows 버전
+standalone-silicon/   Apple Silicon Mac 실험 버전
 docker/       기존 Docker watcher 버전
 sample/       짧은 테스트 미디어
 ```
