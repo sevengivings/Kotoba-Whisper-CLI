@@ -25,6 +25,7 @@ from kotoba_standalone.launcher import (
     ffmpeg_status_text,
     find_existing_japanese_subtitles,
     format_elapsed_korean,
+    is_subtitle_file,
     launcher_output_dir_from_state,
     launcher_state_from_values,
     media_path_for_subtitle,
@@ -35,6 +36,7 @@ from kotoba_standalone.launcher import (
     recent_work_time_text,
     summarize_existing_translation,
     summarize_progress_line,
+    translate_button_presentation,
     validate_input_path,
 )
 
@@ -204,6 +206,7 @@ def test_media_filetypes_include_video_and_audio_patterns() -> None:
 
     assert "*.mp4" in filetypes[0][1]
     assert "*.wav" in filetypes[0][1]
+    assert "*.srt" in filetypes[0][1]
 
 
 def test_validate_input_path_accepts_supported_media_file(tmp_path: Path) -> None:
@@ -213,11 +216,19 @@ def test_validate_input_path_accepts_supported_media_file(tmp_path: Path) -> Non
     assert validate_input_path(media) is None
 
 
+def test_validate_input_path_accepts_srt_file(tmp_path: Path) -> None:
+    subtitle = tmp_path / "sample.ja.srt"
+    subtitle.write_text("", encoding="utf-8")
+
+    assert is_subtitle_file(subtitle)
+    assert validate_input_path(subtitle) is None
+
+
 def test_validate_input_path_rejects_non_media_file(tmp_path: Path) -> None:
     document = tmp_path / "sample.txt"
     document.write_text("", encoding="utf-8")
 
-    assert validate_input_path(document) == "동영상 또는 음성 파일만 선택할 수 있습니다."
+    assert validate_input_path(document) == "동영상, 음성, 또는 SRT 자막 파일만 선택할 수 있습니다."
 
 
 def test_validate_input_path_rejects_folder_without_media(tmp_path: Path) -> None:
@@ -236,6 +247,16 @@ def test_find_existing_japanese_subtitles_for_media_file(tmp_path: Path) -> None
     expected.write_text("", encoding="utf-8")
 
     assert find_existing_japanese_subtitles(media, output_dir) == [expected]
+
+
+def test_find_existing_japanese_subtitles_accepts_direct_srt_input(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    subtitle = tmp_path / "sample.ja.srt"
+    subtitle.write_text("", encoding="utf-8")
+
+    assert find_existing_japanese_subtitles(subtitle, output_dir) == [subtitle]
+    assert pending_translation_subtitles(subtitle, output_dir) == [subtitle]
 
 
 def test_find_existing_japanese_subtitles_for_folder_input(tmp_path: Path) -> None:
@@ -339,6 +360,20 @@ def test_copy_korean_subtitles_to_input_location_handles_folder_input(tmp_path: 
     assert media.with_suffix(".srt").read_text(encoding="utf-8") == "translated\n"
 
 
+def test_copy_korean_subtitles_to_input_location_handles_direct_srt_input(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    subtitle = tmp_path / "sample.ja.srt"
+    subtitle.write_text("", encoding="utf-8")
+    korean = output_dir / "sample.ko.srt"
+    korean.write_text("translated\n", encoding="utf-8")
+
+    copied = copy_korean_subtitles_to_input_location(subtitle, output_dir, [subtitle])
+
+    assert copied == [tmp_path / "sample.ko.srt"]
+    assert (tmp_path / "sample.ko.srt").read_text(encoding="utf-8") == "translated\n"
+
+
 def test_summarize_existing_translation_counts_japanese_subtitles(tmp_path: Path) -> None:
     media = tmp_path / "sample.mp4"
     output_dir = tmp_path / "out"
@@ -371,6 +406,60 @@ def test_pending_translation_subtitles_checks_copied_media_subtitle(tmp_path: Pa
     media.with_suffix(".srt").write_text("", encoding="utf-8")
 
     assert pending_translation_subtitles(media, output_dir) == []
+
+
+def test_pending_translation_subtitles_checks_direct_srt_translation(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    subtitle = tmp_path / "sample.ja.srt"
+    subtitle.write_text("", encoding="utf-8")
+    subtitle.with_name("sample.ko.srt").write_text("", encoding="utf-8")
+
+    assert pending_translation_subtitles(subtitle, output_dir) == []
+    assert find_existing_japanese_subtitles(subtitle, output_dir) == [subtitle]
+
+
+def test_translate_button_presentation_allows_existing_srt_even_when_output_exists(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    subtitle = tmp_path / "sample.ja.srt"
+    subtitle.write_text("", encoding="utf-8")
+    subtitle.with_name("sample.ko.srt").write_text("", encoding="utf-8")
+
+    assert pending_translation_subtitles(subtitle, output_dir) == []
+    assert translate_button_presentation(
+        process_active=False,
+        translate_selected=False,
+        has_translatable_subtitles=bool(find_existing_japanese_subtitles(subtitle, output_dir)),
+        translation_ready=True,
+    ) == ("normal", "번역 가능")
+
+
+def test_translate_button_presentation_allows_pending_subtitles_before_ollama_check() -> None:
+    assert translate_button_presentation(
+        process_active=False,
+        translate_selected=False,
+        has_translatable_subtitles=True,
+        translation_ready=False,
+    ) == ("normal", "번역 준비")
+
+
+def test_translate_button_presentation_reports_ready_translation() -> None:
+    assert translate_button_presentation(
+        process_active=False,
+        translate_selected=False,
+        has_translatable_subtitles=True,
+        translation_ready=True,
+    ) == ("normal", "번역 가능")
+
+
+def test_translate_button_presentation_disables_without_pending_subtitles() -> None:
+    assert translate_button_presentation(
+        process_active=False,
+        translate_selected=False,
+        has_translatable_subtitles=False,
+        translation_ready=True,
+    ) == ("disabled", "번역")
 
 
 def test_find_existing_japanese_subtitles_for_folder_ignores_unrelated_output(tmp_path: Path) -> None:

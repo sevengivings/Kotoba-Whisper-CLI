@@ -279,6 +279,8 @@ def build_translate_command(input_srt: Path, options: LauncherTranslationOptions
 
 def find_existing_japanese_subtitles(input_path: Path, output_dir: Path) -> list[Path]:
     if input_path.is_file():
+        if is_subtitle_file(input_path):
+            return [input_path]
         candidate = output_dir / f"{input_path.stem}.ja.srt"
         return [candidate] if candidate.exists() else []
     if input_path.is_dir():
@@ -311,6 +313,9 @@ def pending_translation_subtitles(input_path: Path, output_dir: Path) -> list[Pa
 
 def translated_subtitle_exists(input_srt: Path, input_path: Path, output_dir: Path) -> bool:
     candidates = [output_dir / default_output_srt(input_srt).name]
+    if input_path.is_file() and is_subtitle_file(input_path):
+        candidates.append(default_output_srt(input_path))
+        return any(path.exists() for path in candidates)
     if input_path.is_file():
         candidates.extend(
             [
@@ -321,7 +326,26 @@ def translated_subtitle_exists(input_srt: Path, input_path: Path, output_dir: Pa
     return any(path.exists() for path in candidates)
 
 
+def translate_button_presentation(
+    *,
+    process_active: bool,
+    translate_selected: bool,
+    has_translatable_subtitles: bool,
+    translation_ready: bool,
+) -> tuple[str, str]:
+    if process_active or translate_selected or not has_translatable_subtitles:
+        return "disabled", "번역"
+    if translation_ready:
+        return "normal", "번역 가능"
+    return "normal", "번역 준비"
+
+
 def expected_output_paths(input_path: Path, output_dir: Path) -> list[Path]:
+    if input_path.is_file() and is_subtitle_file(input_path):
+        return [
+            output_dir / default_output_srt(input_path).name,
+            default_output_srt(input_path),
+        ]
     if input_path.is_file():
         return [
             output_dir / f"{input_path.stem}.ja.srt",
@@ -349,6 +373,13 @@ def media_path_for_subtitle(input_path: Path, input_srt: Path) -> Path | None:
 
 def copy_korean_subtitles_to_input_location(input_path: Path, output_dir: Path, input_srt_paths: list[Path]) -> list[Path]:
     copied_paths: list[Path] = []
+    if input_path.is_file() and is_subtitle_file(input_path):
+        ko_srt_path = output_dir / default_output_srt(input_path).name
+        target = default_output_srt(input_path)
+        if ko_srt_path.exists() and ko_srt_path.resolve() != target.resolve():
+            shutil.copy2(ko_srt_path, target)
+            copied_paths.append(target)
+        return copied_paths
     for input_srt in input_srt_paths:
         ko_srt_path = output_dir / default_output_srt(input_srt).name
         media_path = media_path_for_subtitle(input_path, input_srt)
@@ -557,19 +588,27 @@ def open_path_in_file_manager(path: Path) -> None:
 def media_filetypes() -> list[tuple[str, str]]:
     video_patterns = " ".join(f"*{extension}" for extension in sorted(VIDEO_EXTENSIONS))
     audio_patterns = " ".join(f"*{extension}" for extension in sorted(AUDIO_EXTENSIONS))
-    all_patterns = " ".join([video_patterns, audio_patterns])
+    subtitle_patterns = "*.srt"
+    all_patterns = " ".join([video_patterns, audio_patterns, subtitle_patterns])
     return [
-        ("Video and audio files", all_patterns),
+        ("Video, audio, and subtitle files", all_patterns),
         ("Video files", video_patterns),
         ("Audio files", audio_patterns),
+        ("Subtitle files", subtitle_patterns),
     ]
+
+
+def is_subtitle_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() == ".srt"
 
 
 def validate_input_path(path: Path) -> str | None:
     if not path.exists():
         return "선택한 입력 경로가 존재하지 않습니다."
+    if is_subtitle_file(path):
+        return None
     if path.is_file() and not is_supported_media(path):
-        return "동영상 또는 음성 파일만 선택할 수 있습니다."
+        return "동영상, 음성, 또는 SRT 자막 파일만 선택할 수 있습니다."
     if path.is_dir() and not any(child.is_file() and is_supported_media(child) for child in path.iterdir()):
         return "선택한 폴더에 처리 가능한 동영상 또는 음성 파일이 없습니다."
     return None
@@ -1092,7 +1131,7 @@ class KotobaLauncher:
         self.verified_translation_models = set(sorted_models)
         self._refresh_translation_controls()
         if action == "models":
-            ModelDialog(self.root, sorted_models, self.model)
+            ModelDialog(self.root, sorted_models, self.model, on_select=self._on_ollama_model_selected)
             return
 
         recommended = [model for model in sorted_models if format_ollama_model_choice(model).startswith("[번역 추천]")]
@@ -1112,6 +1151,12 @@ class KotobaLauncher:
     def change_ollama_server(self) -> None:
         OllamaServerDialog(self.root, self.ollama_host, self.ollama_port)
 
+    def _on_ollama_model_selected(self, model: str) -> None:
+        self.verified_translation_models.add(model)
+        self.ollama_status.set(f"{ollama_server_text(self.ollama_host.get(), self._state_ollama_port())} (모델 선택됨)")
+        self._refresh_translation_controls()
+        self._refresh_derived_status()
+
     def start(self) -> None:
         input_text = self.input_path.get().strip()
         if not input_text:
@@ -1120,6 +1165,10 @@ class KotobaLauncher:
         validation_error = validate_input_path(Path(input_text))
         if validation_error is not None:
             messagebox.showwarning("입력 확인", validation_error)
+            return
+        if is_subtitle_file(Path(input_text)):
+            messagebox.showinfo("SRT 번역", "SRT 파일은 전사하지 않고 번역 버튼으로 한국어 번역을 실행하세요.")
+            self._refresh_derived_status()
             return
         ollama_port = self._ollama_port_or_warn()
         if ollama_port is None:
@@ -1558,27 +1607,25 @@ class KotobaLauncher:
     def _update_translate_button_state(self) -> None:
         if not hasattr(self, "translate_button"):
             return
-        if self.process is not None or self.started_at is not None:
-            self.translate_button.configure(state="disabled")
-            return
-        if not self._translation_controls_ready():
-            self.translate_button.configure(state="disabled", text="번역")
-            return
         input_text = self.input_path.get().strip()
         output_text = self.output_dir.get().strip()
-        has_pending_subtitles = bool(
-            input_text and output_text and pending_translation_subtitles(Path(input_text), Path(output_text))
+        has_translatable_subtitles = bool(
+            input_text and output_text and find_existing_japanese_subtitles(Path(input_text), Path(output_text))
         )
-        if self.translate.get() or not has_pending_subtitles:
-            self.translate_button.configure(state="disabled", text="번역")
-        else:
-            self.translate_button.configure(state="normal", text="번역 가능")
+        state, text = translate_button_presentation(
+            process_active=self.process is not None or self.started_at is not None,
+            translate_selected=self.translate.get(),
+            has_translatable_subtitles=has_translatable_subtitles,
+            translation_ready=self._translation_controls_ready(),
+        )
+        self.translate_button.configure(state=state, text=text)
 
 
 class ModelDialog:
-    def __init__(self, root: Tk, models: list[str], target: StringVar) -> None:
+    def __init__(self, root: Tk, models: list[str], target: StringVar, on_select: Any | None = None) -> None:
         self.target = target
         self.models = models
+        self.on_select = on_select
         self.window = Toplevel(root)
         dialog = self.window
         dialog.title("Ollama 모델 선택")
@@ -1612,7 +1659,10 @@ class ModelDialog:
     def select(self) -> None:
         selection = self.listbox.curselection()
         if selection:
-            self.target.set(self.models[selection[0]])
+            model = self.models[selection[0]]
+            self.target.set(model)
+            if self.on_select is not None:
+                self.on_select(model)
         self.window.winfo_toplevel().destroy()
 
 
