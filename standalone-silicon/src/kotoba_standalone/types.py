@@ -8,7 +8,7 @@ from typing import Literal
 KoreanStyle = Literal["polite", "banmal", "strict-banmal"]
 VadEngine = Literal["ffmpeg", "pyannote"]
 AlignmentEngine = Literal["none", "whisperx"]
-AsrBackend = Literal["kotoba", "faster-kotoba", "kotoba-mlx", "qwen3"]
+AsrBackend = Literal["kotoba", "faster-kotoba", "kotoba-mlx", "qwen3", "qwen3-mlx"]
 
 
 @dataclass(frozen=True)
@@ -44,6 +44,8 @@ class ProcessOptions:
     qwen_model_name: str = "Qwen/Qwen3-ASR-1.7B"
     qwen_aligner_model: str = "Qwen/Qwen3-ForcedAligner-0.6B"
     qwen_return_timestamps: bool = True
+    qwen_mlx_model_name: str = "Qwen/Qwen3-ASR-1.7B"
+    qwen_mlx_return_timestamps: bool = False
     faster_model_name: str = "RoachLin/kotoba-whisper-v2.2-faster"
     mlx_model_path: str = "models/kotoba-whisper-v2.2-mlx-q4"
     mlx_device: str = "gpu"

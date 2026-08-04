@@ -40,6 +40,9 @@ faster = [
 mlx = [
     "mlx-whisper==0.4.3",
 ]
+qwen-mlx = [
+    "mlx-qwen3-asr>=0.3.5,<0.4",
+]
 qwen = [
     "qwen-asr>=0.0.6",
 ]

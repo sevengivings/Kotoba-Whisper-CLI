@@ -26,6 +26,7 @@ from kotoba_standalone.media import (
 from kotoba_standalone.pyannote_vad import PyannoteVadError, detect_speech_spans_pyannote
 from kotoba_standalone.faster_transcriber import FasterKotobaTranscriber
 from kotoba_standalone.mlx_transcriber import MlxKotobaTranscriber
+from kotoba_standalone.qwen_mlx_transcriber import Qwen3MlxTranscriber
 from kotoba_standalone.qwen_transcriber import Qwen3Transcriber
 from kotoba_standalone.progress import ProgressCallback
 from kotoba_standalone.subtitle import (
@@ -342,6 +343,7 @@ def process_video(
                 "asr_model": _asr_model_name(options),
                 "qwen_aligner_model": options.qwen_aligner_model if options.asr_backend == "qwen3" else None,
                 "qwen_return_timestamps": options.qwen_return_timestamps if options.asr_backend == "qwen3" else None,
+                "qwen_mlx_return_timestamps": options.qwen_mlx_return_timestamps if options.asr_backend == "qwen3-mlx" else None,
                 "vad_engine": options.vad_engine,
                 "silence_threshold_db": silence_threshold_db if options.vad_engine == "ffmpeg" else None,
                 "min_silence_duration_s": options.min_silence_duration_s,
@@ -567,7 +569,9 @@ def translation_options_from_process(options: ProcessOptions, output: Path | Non
     )
 
 
-def create_transcriber(options: ProcessOptions) -> KotobaTranscriber | FasterKotobaTranscriber | MlxKotobaTranscriber | Qwen3Transcriber:
+def create_transcriber(
+    options: ProcessOptions,
+) -> KotobaTranscriber | FasterKotobaTranscriber | MlxKotobaTranscriber | Qwen3Transcriber | Qwen3MlxTranscriber:
     if options.asr_backend == "kotoba":
         return KotobaTranscriber(options)
     if options.asr_backend == "faster-kotoba":
@@ -576,12 +580,16 @@ def create_transcriber(options: ProcessOptions) -> KotobaTranscriber | FasterKot
         return MlxKotobaTranscriber(options)
     if options.asr_backend == "qwen3":
         return Qwen3Transcriber(options)
+    if options.asr_backend == "qwen3-mlx":
+        return Qwen3MlxTranscriber(options)
     raise ValueError(f"Unsupported ASR backend: {options.asr_backend}")
 
 
 def _asr_model_name(options: ProcessOptions) -> str:
     if options.asr_backend == "qwen3":
         return options.qwen_model_name
+    if options.asr_backend == "qwen3-mlx":
+        return options.qwen_mlx_model_name
     if options.asr_backend == "faster-kotoba":
         return options.faster_model_name
     if options.asr_backend == "kotoba-mlx":

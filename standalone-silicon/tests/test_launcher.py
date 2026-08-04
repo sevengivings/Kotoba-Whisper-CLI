@@ -32,6 +32,7 @@ from kotoba_standalone.launcher import (
     media_path_for_subtitle,
     media_filetypes,
     ollama_server_text,
+    open_path_in_file_manager,
     pending_translation_subtitles,
     estimate_history_text,
     recent_work_time_text,
@@ -78,6 +79,33 @@ def test_build_process_command_adds_qwen_backend(tmp_path: Path) -> None:
 
     assert command[command.index("--asr-backend") + 1] == "qwen3"
     assert command[command.index("--model-dtype") + 1] == "bfloat16"
+
+
+def test_build_process_command_adds_qwen_mlx_backend(tmp_path: Path) -> None:
+    command = build_process_command(
+        LauncherOptions(
+            input_path=tmp_path / "sample.mp4",
+            output_dir=tmp_path / "out",
+            asr_backend="qwen3-mlx",
+        )
+    )
+
+    assert command[command.index("--asr-backend") + 1] == "qwen3-mlx"
+    assert command[command.index("--model-dtype") + 1] == "float16"
+
+
+def test_build_process_command_adds_qwen_mlx_model_name(tmp_path: Path) -> None:
+    command = build_process_command(
+        LauncherOptions(
+            input_path=tmp_path / "sample.mp4",
+            output_dir=tmp_path / "out",
+            asr_backend="qwen3-mlx",
+            qwen_mlx_model_name="Qwen/Qwen3-ASR-0.6B",
+        )
+    )
+
+    assert command[command.index("--asr-backend") + 1] == "qwen3-mlx"
+    assert command[command.index("--qwen-mlx-model-name") + 1] == "Qwen/Qwen3-ASR-0.6B"
 
 
 def test_build_process_command_adds_faster_backend(tmp_path: Path) -> None:
@@ -151,28 +179,38 @@ def test_default_model_device_follows_selected_backend() -> None:
 
 def test_asr_backend_label_helpers() -> None:
     assert asr_backend_from_label("Qwen3-ASR 1.7B (실험)") == "qwen3"
+    assert asr_backend_from_label("Qwen3-ASR 0.6B MLX (고속실험)") == "qwen3-mlx"
+    assert asr_backend_from_label("Qwen3-ASR 1.7B MLX") == "qwen3-mlx"
     assert asr_backend_from_label("Kotoba-Whisper faster CPU") == "faster-kotoba"
-    assert asr_backend_from_label("Kotoba-Whisper v2.2 MLX (실험)") == "kotoba-mlx"
+    assert asr_backend_from_label("Kotoba-Whisper v2.2 MLX") == "kotoba-mlx"
     assert asr_backend_from_label("Kotoba-Whisper v2.2") == "kotoba"
     assert asr_backend_label("faster-kotoba") == "Kotoba-Whisper faster CPU"
-    assert asr_backend_label("kotoba-mlx") == "Kotoba-Whisper v2.2 MLX (실험)"
+    assert asr_backend_label("kotoba-mlx") == "Kotoba-Whisper v2.2 MLX"
     assert asr_backend_label("qwen3").startswith("Qwen3-ASR")
+    assert asr_backend_label("qwen3-mlx-0.6b") == "Qwen3-ASR 0.6B MLX (고속실험)"
+    assert asr_backend_label("qwen3-mlx") == "Qwen3-ASR 1.7B MLX"
     assert asr_backend_label("unknown") == "Kotoba-Whisper v2.2 (MPS 실험)"
 
 
 def test_available_asr_backend_labels_show_faster_only_without_cuda() -> None:
     assert available_asr_backend_labels(("cpu",)) == (
         "Kotoba-Whisper faster CPU",
-        "Kotoba-Whisper v2.2 MLX (실험)",
+        "Kotoba-Whisper v2.2 MLX",
+        "Qwen3-ASR 0.6B MLX (고속실험)",
+        "Qwen3-ASR 1.7B MLX",
     )
     assert available_asr_backend_labels(("cuda:0", "cpu")) == (
         "Kotoba-Whisper v2.2",
         "Qwen3-ASR 1.7B (실험)",
+        "Qwen3-ASR 0.6B MLX (고속실험)",
+        "Qwen3-ASR 1.7B MLX",
     )
     assert available_asr_backend_labels(("mps", "cpu")) == (
         "Kotoba-Whisper faster CPU",
-        "Kotoba-Whisper v2.2 MLX (실험)",
+        "Kotoba-Whisper v2.2 MLX",
         "Kotoba-Whisper v2.2 (MPS 실험)",
+        "Qwen3-ASR 0.6B MLX (고속실험)",
+        "Qwen3-ASR 1.7B MLX",
     )
 
 
@@ -182,12 +220,34 @@ def test_coerce_asr_backend_uses_faster_without_cuda() -> None:
     assert coerce_asr_backend("faster-kotoba", ("cuda:0", "cpu")) == "kotoba"
     assert coerce_asr_backend("faster-kotoba", ("mps", "cpu")) == "faster-kotoba"
     assert coerce_asr_backend("kotoba-mlx", ("cpu",)) == "kotoba-mlx"
+    assert coerce_asr_backend("qwen3-mlx", ("cpu",)) == "qwen3-mlx"
+    assert coerce_asr_backend("qwen3-mlx-0.6b", ("cpu",)) == "qwen3-mlx-0.6b"
 
 
 def test_available_model_devices_returns_cpu_when_torch_missing(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "torch", None)
 
     assert available_model_devices() == ("cpu",)
+
+
+def test_open_path_in_file_manager_uses_macos_open(monkeypatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda command: calls.append(command))
+
+    open_path_in_file_manager(tmp_path)
+
+    assert calls == [["open", str(tmp_path)]]
+
+
+def test_open_path_in_file_manager_uses_windows_startfile(monkeypatch, tmp_path: Path) -> None:
+    calls: list[Path] = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(launcher.os, "startfile", lambda path: calls.append(path), raising=False)
+
+    open_path_in_file_manager(tmp_path)
+
+    assert calls == [tmp_path]
 
 
 def test_available_model_devices_lists_cuda_devices(monkeypatch) -> None:

@@ -54,6 +54,7 @@ class LauncherOptions:
     korean_style: str = "polite"
     model_device: str = "cpu"
     asr_backend: str = "faster-kotoba"
+    qwen_mlx_model_name: str = ""
     ollama_host: str = "localhost"
     ollama_port: int = 11434
 
@@ -69,6 +70,10 @@ class LauncherTranslationOptions:
 
 
 GUI_ASR_BACKEND = "kotoba-mlx"
+QWEN3_MLX_06B_MODEL = "Qwen/Qwen3-ASR-0.6B"
+QWEN3_MLX_17B_MODEL = "Qwen/Qwen3-ASR-1.7B"
+QWEN3_MLX_06B_LABEL = "Qwen3-ASR 0.6B MLX (고속실험)"
+QWEN3_MLX_17B_LABEL = "Qwen3-ASR 1.7B MLX"
 
 
 def format_elapsed_korean(seconds: float) -> str:
@@ -106,6 +111,10 @@ def build_process_command(options: LauncherOptions) -> list[str]:
         command.extend(["--asr-backend", "kotoba-mlx"])
     if options.asr_backend == "qwen3":
         command.extend(["--asr-backend", "qwen3", "--model-dtype", "bfloat16"])
+    if options.asr_backend == "qwen3-mlx":
+        command.extend(["--asr-backend", "qwen3-mlx", "--model-dtype", "float16"])
+        if options.qwen_mlx_model_name.strip():
+            command.extend(["--qwen-mlx-model-name", options.qwen_mlx_model_name.strip()])
     if options.translate:
         command.append("--translate")
         if options.translation_model.strip():
@@ -177,31 +186,60 @@ def coerce_model_device(device: str, available_devices: tuple[str, ...]) -> str:
 def asr_backend_from_label(label: str) -> str:
     if "faster CPU" in label:
         return "faster-kotoba"
+    if "Qwen3-ASR" in label and "MLX" in label:
+        return "qwen3-mlx"
     if "MLX" in label:
         return "kotoba-mlx"
     return "qwen3" if "Qwen3" in label else "kotoba"
+
+
+def qwen_mlx_model_name_from_label(label: str) -> str:
+    if "0.6B" in label:
+        return QWEN3_MLX_06B_MODEL
+    if "1.7B" in label and "MLX" in label:
+        return QWEN3_MLX_17B_MODEL
+    return ""
+
+
+def asr_backend_storage_value(label: str) -> str:
+    backend = asr_backend_from_label(label)
+    if backend == "qwen3-mlx" and qwen_mlx_model_name_from_label(label) == QWEN3_MLX_06B_MODEL:
+        return "qwen3-mlx-0.6b"
+    return backend
 
 
 def asr_backend_label(value: str) -> str:
     if value == "faster-kotoba":
         return "Kotoba-Whisper faster CPU"
     if value == "kotoba-mlx":
-        return "Kotoba-Whisper v2.2 MLX (실험)"
+        return "Kotoba-Whisper v2.2 MLX"
     if value == "qwen3":
         return "Qwen3-ASR 1.7B (실험)"
+    if value == "qwen3-mlx-0.6b":
+        return QWEN3_MLX_06B_LABEL
+    if value == "qwen3-mlx":
+        return QWEN3_MLX_17B_LABEL
     return "Kotoba-Whisper v2.2 (MPS 실험)"
 
 
 def available_asr_backend_labels(available_devices: tuple[str, ...]) -> tuple[str, ...]:
     if any(device.startswith("cuda:") for device in available_devices):
-        return ("Kotoba-Whisper v2.2", "Qwen3-ASR 1.7B (실험)")
+        return ("Kotoba-Whisper v2.2", "Qwen3-ASR 1.7B (실험)", QWEN3_MLX_06B_LABEL, QWEN3_MLX_17B_LABEL)
     if "mps" in available_devices:
-        return ("Kotoba-Whisper faster CPU", "Kotoba-Whisper v2.2 MLX (실험)", "Kotoba-Whisper v2.2 (MPS 실험)")
-    return ("Kotoba-Whisper faster CPU", "Kotoba-Whisper v2.2 MLX (실험)")
+        return (
+            "Kotoba-Whisper faster CPU",
+            "Kotoba-Whisper v2.2 MLX",
+            "Kotoba-Whisper v2.2 (MPS 실험)",
+            QWEN3_MLX_06B_LABEL,
+            QWEN3_MLX_17B_LABEL,
+        )
+    return ("Kotoba-Whisper faster CPU", "Kotoba-Whisper v2.2 MLX", QWEN3_MLX_06B_LABEL, QWEN3_MLX_17B_LABEL)
 
 
 def coerce_asr_backend(backend: str, available_devices: tuple[str, ...]) -> str:
     allowed = {asr_backend_from_label(label) for label in available_asr_backend_labels(available_devices)}
+    if backend == "qwen3-mlx-0.6b" and "qwen3-mlx" in allowed:
+        return backend
     if backend in allowed:
         return backend
     return "faster-kotoba" if "faster-kotoba" in allowed else "kotoba"
@@ -487,7 +525,9 @@ def launcher_state_from_values(
         "external_ffmpeg_path": ffmpeg_path,
         "ollama_host": ollama_host,
         "ollama_port": ollama_port,
-        "asr_backend": asr_backend if asr_backend in {"kotoba", "faster-kotoba", "kotoba-mlx", "qwen3"} else "faster-kotoba",
+        "asr_backend": asr_backend
+        if asr_backend in {"kotoba", "faster-kotoba", "kotoba-mlx", "qwen3", "qwen3-mlx", "qwen3-mlx-0.6b"}
+        else "faster-kotoba",
     }
 
 
@@ -502,6 +542,16 @@ def launcher_output_dir_from_state(state: dict, app_root: Path | None = None) ->
         if isinstance(saved_output, str) and saved_output.strip():
             return Path(saved_output)
     return root / "tmp-output"
+
+
+def open_path_in_file_manager(path: Path) -> None:
+    if sys.platform == "win32":
+        os.startfile(path)
+        return
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+        return
+    subprocess.Popen(["xdg-open", str(path)])
 
 
 def media_filetypes() -> list[tuple[str, str]]:
@@ -766,8 +816,8 @@ class KotobaLauncher:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("Kotoba Standalone Silicon")
-        self.root.geometry("860x505")
-        self.root.minsize(820, 505)
+        self.root.geometry("860x535")
+        self.root.minsize(820, 535)
         self.events: queue.Queue[tuple[str, str | None]] = queue.Queue()
         self.process: subprocess.Popen[str] | None = None
         self.started_at: float | None = None
@@ -781,9 +831,12 @@ class KotobaLauncher:
         self.app_root = standalone_root()
         state = load_launcher_state()
         self.available_model_devices = available_model_devices()
-        initial_asr_backend = GUI_ASR_BACKEND
-        initial_model_device = default_model_device_for_backend(initial_asr_backend, self.available_model_devices)
         self.available_asr_backends = available_asr_backend_labels(self.available_model_devices)
+        initial_asr_backend = coerce_asr_backend(str(state.get("asr_backend") or GUI_ASR_BACKEND), self.available_model_devices)
+        initial_model_device = default_model_device_for_backend(
+            asr_backend_from_label(asr_backend_label(initial_asr_backend)),
+            self.available_model_devices,
+        )
 
         self.input_path = StringVar(value="")
         self.output_dir = StringVar(value=str(launcher_output_dir_from_state(state, self.app_root)))
@@ -807,6 +860,7 @@ class KotobaLauncher:
         self._build_ui()
         self.translate.trace_add("write", lambda *_args: self._refresh_derived_status())
         self.model.trace_add("write", lambda *_args: self._refresh_translation_controls())
+        self.asr_engine.trace_add("write", lambda *_args: self._refresh_asr_engine_selection())
         self.input_path.trace_add("write", lambda *_args: self._refresh_derived_status())
         self.output_dir.trace_add("write", lambda *_args: self._refresh_derived_status())
         self.external_ffmpeg_path.trace_add("write", lambda *_args: self._refresh_ffmpeg_status())
@@ -832,21 +886,30 @@ class KotobaLauncher:
             row=1, column=2, columnspan=2, sticky="ew", padx=3, pady=form_pady
         )
 
+        ttk.Label(outer, text="전사 엔진").grid(row=2, column=0, sticky="w", pady=form_pady)
+        self.asr_engine_box = ttk.Combobox(
+            outer,
+            textvariable=self.asr_engine,
+            values=self.available_asr_backends,
+            state="readonly",
+        )
+        self.asr_engine_box.grid(row=2, column=1, sticky="ew", padx=8, pady=form_pady)
+
         self.translation_model_label = ttk.Label(outer, text="번역 모델")
-        self.translation_model_label.grid(row=2, column=0, sticky="w", pady=form_pady)
+        self.translation_model_label.grid(row=3, column=0, sticky="w", pady=form_pady)
         self.translation_model_entry = ttk.Entry(outer, textvariable=self.model)
-        self.translation_model_entry.grid(row=2, column=1, sticky="ew", padx=8, pady=form_pady)
+        self.translation_model_entry.grid(row=3, column=1, sticky="ew", padx=8, pady=form_pady)
         self.ollama_models_button = ttk.Button(outer, text="Ollama 모델", command=self.load_ollama_models)
         self.ollama_models_button.grid(
-            row=2, column=2, sticky="ew", padx=3, pady=form_pady
+            row=3, column=2, sticky="ew", padx=3, pady=form_pady
         )
         self.ollama_check_button = ttk.Button(outer, text="Ollama 확인", command=self.check_ollama)
         self.ollama_check_button.grid(
-            row=2, column=3, sticky="ew", padx=3, pady=form_pady
+            row=3, column=3, sticky="ew", padx=3, pady=form_pady
         )
 
         self.korean_style_label = ttk.Label(outer, text="한국어 말투")
-        self.korean_style_label.grid(row=3, column=0, sticky="w", pady=form_pady)
+        self.korean_style_label.grid(row=4, column=0, sticky="w", pady=form_pady)
         self.korean_style_box = ttk.Combobox(
             outer,
             textvariable=self.korean_style,
@@ -854,10 +917,10 @@ class KotobaLauncher:
             state="readonly",
             width=18,
         )
-        self.korean_style_box.grid(row=3, column=1, sticky="w", padx=8, pady=form_pady)
+        self.korean_style_box.grid(row=4, column=1, sticky="w", padx=8, pady=form_pady)
 
         buttons = ttk.Frame(outer)
-        buttons.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(10, 8))
+        buttons.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(10, 8))
         buttons.columnconfigure(0, weight=1)
         self.translate_checkbutton = ttk.Checkbutton(buttons, text="한국어 번역까지 실행", variable=self.translate)
         self.translate_checkbutton.grid(row=0, column=1, padx=(0, 12))
@@ -873,7 +936,7 @@ class KotobaLauncher:
         self.open_input_button.grid(row=0, column=6, padx=4)
 
         progress_panel = ttk.LabelFrame(outer, text="진행", padding=(10, 8))
-        progress_panel.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        progress_panel.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(4, 0))
         progress_panel.columnconfigure(1, weight=1)
         ttk.Label(progress_panel, text="처리 시간:", style="Panel.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
         ttk.Label(progress_panel, textvariable=self.status, style="Panel.TLabel").grid(row=0, column=1, sticky="w")
@@ -899,7 +962,7 @@ class KotobaLauncher:
         ttk.Button(log_buttons, text="로그 복사", command=self.copy_log).grid(row=1, column=0, sticky="ew")
 
         status_panel = ttk.LabelFrame(outer, text="상태", padding=(10, 6))
-        status_panel.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        status_panel.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         status_panel.columnconfigure(0, weight=1)
         status_panel.columnconfigure(1, weight=0)
 
@@ -1064,7 +1127,8 @@ class KotobaLauncher:
         if self.translate.get() and not self._translation_controls_ready():
             messagebox.showwarning("Ollama 확인 필요", "Ollama 번역 모델을 먼저 확인하거나 선택해 주세요.")
             return
-        asr_backend = GUI_ASR_BACKEND
+        selected_label = self.asr_engine.get()
+        asr_backend = asr_backend_from_label(selected_label)
         if asr_backend == "qwen3" and not qwen_environment_python().exists():
             messagebox.showwarning(
                 "Qwen3-ASR 설치 필요",
@@ -1080,6 +1144,7 @@ class KotobaLauncher:
             korean_style=self.korean_style.get(),
             model_device=default_model_device_for_backend(asr_backend, self.available_model_devices),
             asr_backend=asr_backend,
+            qwen_mlx_model_name=qwen_mlx_model_name_from_label(selected_label),
             ollama_host=self.ollama_host.get().strip() or "localhost",
             ollama_port=ollama_port,
         )
@@ -1347,6 +1412,11 @@ class KotobaLauncher:
         self.qwen_status.set(qwen_environment_status_text())
         self._remember_state()
 
+    def _refresh_asr_engine_selection(self) -> None:
+        asr_backend = asr_backend_from_label(self.asr_engine.get())
+        self.model_device.set(default_model_device_for_backend(asr_backend, self.available_model_devices))
+        self._refresh_derived_status()
+
     def _ollama_port_or_warn(self) -> int | None:
         try:
             port = int(self.ollama_port.get().strip())
@@ -1361,7 +1431,7 @@ class KotobaLauncher:
     def open_output_dir(self) -> None:
         output_dir = Path(self.output_dir.get().strip() or Path.cwd() / "tmp-output")
         output_dir.mkdir(parents=True, exist_ok=True)
-        os.startfile(output_dir)
+        open_path_in_file_manager(output_dir)
 
     def open_input_dir(self) -> None:
         input_text = self.input_path.get().strip()
@@ -1373,7 +1443,7 @@ class KotobaLauncher:
         if not target_dir.exists():
             messagebox.showwarning("입력 폴더 열기", f"입력 폴더가 존재하지 않습니다.\n\n{target_dir}")
             return
-        os.startfile(target_dir)
+        open_path_in_file_manager(target_dir)
 
     def _refresh_derived_status(self) -> None:
         self._remember_state()
@@ -1384,10 +1454,11 @@ class KotobaLauncher:
             self.estimate_status.set("이력 부족")
             self._update_translate_button_state()
             return
+        asr_backend = asr_backend_from_label(self.asr_engine.get())
         if not input_text:
             output_dir = Path(output_text)
             self.translation_status.set("입력/작업 폴더 필요")
-            self.estimate_status.set(estimate_history_text(output_dir, GUI_ASR_BACKEND))
+            self.estimate_status.set(estimate_history_text(output_dir, asr_backend))
             self._update_translate_button_state()
             return
         input_path = Path(input_text)
@@ -1400,7 +1471,7 @@ class KotobaLauncher:
                 output_dir,
                 self.translate.get() or has_subtitles,
                 self.external_ffmpeg_path.get(),
-                GUI_ASR_BACKEND,
+                asr_backend,
             )
         )
         self._refresh_result_paths()
@@ -1432,11 +1503,12 @@ class KotobaLauncher:
         save_launcher_state(
             launcher_state_from_values(
                 self.output_dir.get().strip(),
-                default_model_device_for_backend(GUI_ASR_BACKEND, self.available_model_devices),
+                self.model_device.get().strip()
+                or default_model_device_for_backend(asr_backend_from_label(self.asr_engine.get()), self.available_model_devices),
                 self.external_ffmpeg_path.get().strip(),
                 self.ollama_host.get().strip() or "localhost",
                 self._state_ollama_port(),
-                GUI_ASR_BACKEND,
+                asr_backend_storage_value(self.asr_engine.get()),
                 self.app_root,
             )
         )

@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     process.add_argument("--vad-padding-s", type=float, default=0.4)
     process.add_argument("--vad-merge-gap-s", type=float, default=0.0)
     process.add_argument("--ffmpeg-path", help=argparse.SUPPRESS)
-    process.add_argument("--asr-backend", choices=("kotoba", "faster-kotoba", "kotoba-mlx", "qwen3"), default="faster-kotoba", help=argparse.SUPPRESS)
+    process.add_argument("--asr-backend", choices=("kotoba", "faster-kotoba", "kotoba-mlx", "qwen3", "qwen3-mlx"), default="faster-kotoba", help=argparse.SUPPRESS)
     process.add_argument("--batch-size", type=int, default=8)
     process.add_argument("--chunk-length-s", type=int, default=15)
     process.add_argument("--model-name", default="kotoba-tech/kotoba-whisper-v2.2")
@@ -80,6 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
     process.add_argument("--qwen-model-name", default="Qwen/Qwen3-ASR-1.7B", help=argparse.SUPPRESS)
     process.add_argument("--qwen-aligner-model", default="Qwen/Qwen3-ForcedAligner-0.6B", help=argparse.SUPPRESS)
     process.add_argument("--no-qwen-timestamps", dest="qwen_return_timestamps", action="store_false", help=argparse.SUPPRESS)
+    process.add_argument("--qwen-mlx-model-name", default="Qwen/Qwen3-ASR-1.7B", help=argparse.SUPPRESS)
+    process.add_argument("--qwen-mlx-timestamps", dest="qwen_mlx_return_timestamps", action="store_true", help=argparse.SUPPRESS)
     process.add_argument("--mlx-model-path", default="models/kotoba-whisper-v2.2-mlx-q4", help=argparse.SUPPRESS)
     process.add_argument("--mlx-device", choices=("cpu", "gpu"), default="gpu", help=argparse.SUPPRESS)
     process.add_argument("--mlx-word-timestamps", action="store_true", help=argparse.SUPPRESS)
@@ -218,6 +220,8 @@ def run_process(args: argparse.Namespace) -> int:
         qwen_model_name=args.qwen_model_name,
         qwen_aligner_model=args.qwen_aligner_model,
         qwen_return_timestamps=args.qwen_return_timestamps,
+        qwen_mlx_model_name=args.qwen_mlx_model_name,
+        qwen_mlx_return_timestamps=args.qwen_mlx_return_timestamps,
         mlx_model_path=args.mlx_model_path,
         mlx_device=args.mlx_device,
         mlx_word_timestamps=args.mlx_word_timestamps,

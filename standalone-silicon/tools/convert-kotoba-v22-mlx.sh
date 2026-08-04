@@ -18,7 +18,7 @@ if [[ -e "$OUTPUT_DIR/weights.safetensors" || -e "$OUTPUT_DIR/weights.npz" ]]; t
   exit 0
 fi
 
-uv sync --group faster --group transcribe --group torch --group pyannote --group mlx
+uv sync --inexact --group faster --group transcribe --group torch --group pyannote --group mlx
 
 if [[ -z "$EXAMPLES_DIR" ]]; then
   EXAMPLES_DIR="$(mktemp -d /tmp/mlx-examples.XXXXXX)"

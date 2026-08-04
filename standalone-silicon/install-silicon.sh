@@ -11,6 +11,7 @@ WITH_PYANNOTE=true
 WITH_KOTOBA_MPS=true
 WITH_KOTOBA_MLX=true
 WITH_MLX_MODEL=true
+WITH_QWEN_MLX=true
 
 for arg in "$@"; do
   case "$arg" in
@@ -41,8 +42,14 @@ for arg in "$@"; do
     --without-mlx-model)
       WITH_MLX_MODEL=false
       ;;
+    --with-qwen-mlx)
+      WITH_QWEN_MLX=true
+      ;;
+    --without-qwen-mlx)
+      WITH_QWEN_MLX=false
+      ;;
     -h|--help)
-      echo "Usage: ./install-silicon.sh [--without-pyannote] [--without-kotoba-mps] [--without-kotoba-mlx] [--without-mlx-model]"
+      echo "Usage: ./install-silicon.sh [--without-pyannote] [--without-kotoba-mps] [--without-kotoba-mlx] [--without-mlx-model] [--without-qwen-mlx]"
       exit 0
       ;;
     *)
@@ -97,6 +104,9 @@ if [[ "$WITH_PYANNOTE" == "true" ]]; then
 fi
 if [[ "$WITH_KOTOBA_MLX" == "true" ]]; then
   groups+=(--group mlx)
+fi
+if [[ "$WITH_QWEN_MLX" == "true" ]]; then
+  groups+=(--group qwen-mlx)
 fi
 
 echo "Installing Kotoba Standalone Silicon packages..."

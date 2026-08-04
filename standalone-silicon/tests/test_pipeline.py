@@ -174,6 +174,38 @@ def test_process_video_uses_mlx_backend_metadata(tmp_path: Path, monkeypatch: py
     assert process_meta["asr_model"] == "/tmp/kotoba-mlx"
 
 
+def test_process_video_uses_qwen_mlx_backend_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeQwenMlxTranscriber:
+        def __init__(self, options: ProcessOptions) -> None:
+            self.options = options
+
+        def load(self) -> None:
+            return None
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            return FakeResult(text="こんにちは")
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, "Qwen3MlxTranscriber", FakeQwenMlxTranscriber)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
+
+    result = process_video(
+        media,
+        ProcessOptions(
+            output_dir=tmp_path / "out",
+            vad_engine="ffmpeg",
+            asr_backend="qwen3-mlx",
+            qwen_mlx_model_name="Qwen/Qwen3-ASR-0.6B",
+        ),
+    )
+
+    assert result.status == "success"
+    process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
+    assert process_meta["asr_backend"] == "qwen3-mlx"
+    assert process_meta["asr_model"] == "Qwen/Qwen3-ASR-0.6B"
+    assert process_meta["qwen_mlx_return_timestamps"] is False
+
+
 def test_process_video_can_write_whisperx_aligned_subtitles(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

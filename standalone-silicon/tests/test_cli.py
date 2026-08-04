@@ -45,6 +45,24 @@ def test_process_parser_accepts_hidden_qwen_backend(tmp_path: Path) -> None:
     assert args.qwen_return_timestamps is True
 
 
+def test_process_parser_accepts_hidden_qwen_mlx_backend(tmp_path: Path) -> None:
+    args = cli.build_parser().parse_args(
+        [
+            "process",
+            str(tmp_path / "a.mp4"),
+            "--asr-backend",
+            "qwen3-mlx",
+            "--qwen-mlx-model-name",
+            "Qwen/Qwen3-ASR-0.6B",
+            "--qwen-mlx-timestamps",
+        ]
+    )
+
+    assert args.asr_backend == "qwen3-mlx"
+    assert args.qwen_mlx_model_name == "Qwen/Qwen3-ASR-0.6B"
+    assert args.qwen_mlx_return_timestamps is True
+
+
 def test_process_parser_accepts_hidden_faster_backend(tmp_path: Path) -> None:
     args = cli.build_parser().parse_args(["process", str(tmp_path / "a.mp4"), "--asr-backend", "faster-kotoba"])
 
