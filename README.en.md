@@ -2,7 +2,7 @@
 
 Language: [한국어](README.md) | **English**
 
-A local tool that extracts Japanese subtitles from media and can translate them into Korean with Ollama. New installations should use the **Docker-free `standalone/` edition**.
+A local tool that extracts Japanese subtitles from media and can translate them into Korean with Ollama. New Windows installations should use the **Docker-free `standalone/` edition**; Apple Silicon Mac users should use `standalone-silicon/`.
 
 ## Easiest Windows Setup
 
@@ -35,9 +35,23 @@ The upstream license, model card, revision, and checksums are preserved in the [
 | Edition | Recommended for | Description |
 | --- | --- | --- |
 | [Standalone](standalone/README.en.md) | New users | Direct uv workflow with Windows GUI and CLI |
-| [Standalone Silicon](standalone-silicon/README.en.md) | Apple Silicon Mac users | Experimental macOS M1+ workflow; GUI uses Kotoba-Whisper v2.2 MLX + pyannote MPS |
+| [Standalone Silicon](standalone-silicon/README.en.md) | Apple Silicon Mac users | macOS M1+ workflow; GUI uses Kotoba-Whisper v2.2 MLX + pyannote MPS |
 | [Docker](docker/README.md) | Existing watcher users | Pyannote-default `input` folder watcher workflow |
 
 Docker code, scripts, configuration, data directories, and model cache all live in `docker/`.
+
+## Models And Thanks
+
+This project stands on several public models and open-source tools. Many thanks to the maintainers and communities behind them.
+
+| Area | Used for | Source |
+| --- | --- | --- |
+| Kotoba-Whisper v2.2 | Default Japanese ASR | `kotoba-tech/kotoba-whisper-v2.2` |
+| OpenAI Whisper | Base model for Kotoba-Whisper | `openai/whisper` |
+| pyannote segmentation 3.0 | Default voice activity detection | `pyannote/segmentation-3.0` |
+| Qwen3-ASR 0.6B/1.7B | Optional Apple Silicon MLX transcription | `Qwen/Qwen3-ASR-0.6B`, `Qwen/Qwen3-ASR-1.7B` |
+| MLX / mlx-whisper / mlx-qwen3-asr | Apple Silicon GPU acceleration | Apple MLX community and contributors |
+| faster-whisper / CTranslate2 | CPU transcription path | faster-whisper, CTranslate2 |
+| Ollama / Hy-MT2 GGUF | Optional Japanese -> Korean translation | Ollama and Hugging Face GGUF model publishers |
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for model and dependency licensing and redistribution notes.

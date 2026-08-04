@@ -4,12 +4,12 @@
 
 이 문서는 Kotoba-Whisper CLI와 standalone 버전을 배포하거나 다른 컴퓨터에 설치할 때 확인해야 할 주요 제3자 모델, 도구, 라이브러리 고지입니다. 법률 자문은 아니며, 실제 공개 배포나 상업 배포 전에는 각 프로젝트의 최신 라이선스와 약관을 다시 확인하세요.
 
-확인일: 2026-07-31
+확인일: 2026-08-04
 
 ## 핵심 요약
 
-- Kotoba-Whisper 및 Ollama 번역 모델은 저장소에 포함하지 않고 사용자가 직접 내려받습니다.
-- standalone과 Docker의 pyannote VAD 모델은 MIT 라이선스 조건에 따라 원본 가중치와 라이선스 전문을 함께 재배포합니다.
+- Kotoba-Whisper, Qwen3-ASR, Ollama 번역 모델은 저장소에 포함하지 않고 사용자가 직접 내려받습니다.
+- standalone, standalone-silicon, Docker의 pyannote VAD 모델은 MIT 라이선스 조건에 따라 원본 가중치와 라이선스 전문을 함께 재배포합니다.
 - 나중에 Windows exe, ZIP, 설치 프로그램 등에 모델 가중치나 변환 모델을 포함하면 재배포에 해당할 수 있으므로, 라이선스 전문과 출처 고지를 반드시 포함하세요.
 - 사용자가 처리하는 영상/음성 자체의 저작권, 개인정보, 성인물 관련 법규 준수 책임은 사용자에게 있습니다.
 
@@ -39,6 +39,17 @@ Apache 2.0 모델을 재배포하는 경우 일반적으로 다음을 지켜야 
 - 라이선스: OpenAI Whisper의 코드와 모델 가중치는 MIT License로 공개되어 있음
 - 출처: https://github.com/openai/whisper
 
+### Qwen3-ASR 0.6B / 1.7B
+
+- 사용 위치: standalone-silicon의 선택적 Apple Silicon MLX 전사 경로
+- 모델 ID: `Qwen/Qwen3-ASR-0.6B`, `Qwen/Qwen3-ASR-1.7B`
+- 라이선스: Hugging Face 모델 카드에서 Apache-2.0으로 표시됨
+- 출처:
+  - https://huggingface.co/Qwen/Qwen3-ASR-0.6B
+  - https://huggingface.co/Qwen/Qwen3-ASR-1.7B
+- 현재 저장소에는 Qwen3-ASR 모델 가중치를 포함하지 않습니다.
+- 기본 설치는 `mlx-qwen3-asr` 실행 의존성만 설치합니다. 모델 가중치는 GUI 또는 CLI에서 처음 선택해 실행할 때 Hugging Face 캐시에 다운로드됩니다.
+
 ### Hy-MT2 GGUF 번역 모델
 
 - 사용 위치: Ollama 기반 일본어 SRT -> 한국어 SRT 번역
@@ -54,13 +65,13 @@ Apache 2.0 모델을 재배포하는 경우 일반적으로 다음을 지켜야 
 
 ### pyannote segmentation 3.0
 
-- 사용 위치: standalone판과 Docker판의 기본 음성 구간 검출(VAD)
+- 사용 위치: standalone판, standalone-silicon판, Docker판의 기본 음성 구간 검출(VAD)
 - 모델 ID: `pyannote/segmentation-3.0`
 - 라이선스: MIT로 표시됨
 - 출처: https://huggingface.co/pyannote/segmentation-3.0
 - 포함 revision: `e66f3d3b9eb0873085418a7b813d3b369bf160bb`
 - Copyright (c) 2023 CNRS
-- 포함 위치: `standalone/src/kotoba_standalone/models/pyannote-segmentation-3.0`, `docker/app/models/pyannote-segmentation-3.0`
+- 포함 위치: `standalone/src/kotoba_standalone/models/pyannote-segmentation-3.0`, `standalone-silicon/src/kotoba_standalone/models/pyannote-segmentation-3.0`, `docker/app/models/pyannote-segmentation-3.0`
 - 포함 파일: 원본 `pytorch_model.bin`, `config.yaml`, `LICENSE`, 모델 카드와 checksum/출처 기록
 - 가중치는 수정하거나 변환하지 않았습니다. 원본 `README.md`의 파일명만 `MODEL_CARD.md`로 변경했습니다.
 - 기본 번들 모델은 로컬에서 직접 로드하므로 최종 사용자의 Hugging Face 계정이나 토큰이 필요하지 않습니다.
@@ -84,12 +95,15 @@ WhisperX가 일본어 alignment에 기본으로 내려받는 모델:
 
 ## 주요 런타임과 라이브러리
 
-아래 항목은 현재 Docker판 또는 standalone판에서 직접 사용하는 주요 구성요소입니다. 정확한 전체 목록은 `docker/requirements.txt`, `standalone/pyproject.toml`, `standalone/uv.lock`, Docker base image의 구성요소를 확인하세요.
+아래 항목은 현재 Docker판, standalone판, standalone-silicon판에서 직접 사용하는 주요 구성요소입니다. 정확한 전체 목록은 `docker/requirements.txt`, `standalone/pyproject.toml`, `standalone/uv.lock`, `standalone-silicon/pyproject.toml`, `standalone-silicon/uv.lock`, Docker base image의 구성요소를 확인하세요.
 
 | 구성요소 | 사용 위치 | 확인된 라이선스/표시 |
 | --- | --- | --- |
 | Hugging Face Transformers | 모델 로딩/추론 | Apache 2.0 |
 | Hugging Face Hub | 모델 다운로드 | Apache |
+| MLX | Apple Silicon GPU 추론 | MIT로 표시 |
+| mlx-whisper | Kotoba-Whisper v2.2 MLX 추론 | MIT로 표시 |
+| mlx-qwen3-asr | Qwen3-ASR Apple Silicon MLX 추론 | Apache 2.0으로 표시 |
 | PyTorch | CUDA 추론 | BSD-3-Clause |
 | torchaudio | 오디오/추론 보조 | BSD 계열로 표시 |
 | safetensors | 모델 파일 로딩 | Apache 2.0 계열로 표시 |
@@ -119,7 +133,7 @@ WhisperX가 일본어 alignment에 기본으로 내려받는 모델:
 - MIT pyannote VAD 모델 외의 모델 캐시는 이미지에 굽지 않는 구성이 가장 단순합니다.
 - 모델 캐시를 이미지에 포함하면 Kotoba-Whisper 모델 재배포 조건을 충족해야 합니다.
 
-### Windows exe 또는 ZIP 배포
+### Windows exe, macOS ZIP, 또는 설치 프로그램 배포
 
 - 모델을 번들하지 않고 첫 실행 시 다운로드하게 하면 배포 크기와 라이선스 부담이 줄어듭니다.
 - 모델을 포함하는 “완전 오프라인 배포판”을 만들 경우 다음을 포함하세요.

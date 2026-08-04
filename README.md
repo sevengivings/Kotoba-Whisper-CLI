@@ -2,7 +2,7 @@
 
 언어: **한국어** | [English](README.en.md)
 
-일본어 영상에서 자막을 추출하고, 필요하면 Ollama로 한국어 자막까지 번역하는 로컬 도구입니다. 새로 설치하는 사용자에게는 **Docker가 필요 없는 `standalone/` 버전**을 권장합니다.
+일본어 영상에서 자막을 추출하고, 필요하면 Ollama로 한국어 자막까지 번역하는 로컬 도구입니다. 새로 설치하는 Windows 사용자에게는 **Docker가 필요 없는 `standalone/` 버전**, Apple Silicon Mac 사용자에게는 `standalone-silicon/` 버전을 권장합니다.
 
 ## 가장 쉬운 Windows 사용 방법
 
@@ -53,18 +53,32 @@ uv run --no-sync kotoba process "D:\Videos\sample.mp4" --translate --translation
 | 버전 | 권장 대상 | 설명 |
 | --- | --- | --- |
 | [standalone](standalone/README.md) | 새 사용자 | uv 기반 직접 실행, Windows GUI와 CLI 제공 |
-| [standalone-silicon](standalone-silicon/README.md) | Apple Silicon Mac 사용자 | macOS M1 이상 실험판, GUI는 Kotoba-Whisper v2.2 MLX + pyannote MPS |
+| [standalone-silicon](standalone-silicon/README.md) | Apple Silicon Mac 사용자 | macOS M1 이상, GUI는 Kotoba-Whisper v2.2 MLX + pyannote MPS |
 | [Docker](docker/README.md) | 기존 watcher 사용자 | pyannote 기본, `input` 폴더 감시 방식 |
 
 Docker 버전의 코드, 실행 스크립트, 설정, 데이터 폴더는 모두 `docker/`에 있습니다.
+
+## 사용한 모델과 감사
+
+이 프로젝트는 여러 공개 모델과 오픈소스 도구 위에 만들어졌습니다. 특히 아래 프로젝트와 커뮤니티에 감사드립니다.
+
+| 구분 | 사용처 | 출처 |
+| --- | --- | --- |
+| Kotoba-Whisper v2.2 | 일본어 음성 인식 기본 모델 | `kotoba-tech/kotoba-whisper-v2.2` |
+| OpenAI Whisper | Kotoba-Whisper의 기반 모델 | `openai/whisper` |
+| pyannote segmentation 3.0 | 기본 음성 구간 검출(VAD) | `pyannote/segmentation-3.0` |
+| Qwen3-ASR 0.6B/1.7B | Apple Silicon MLX 전사 선택지 | `Qwen/Qwen3-ASR-0.6B`, `Qwen/Qwen3-ASR-1.7B` |
+| MLX / mlx-whisper / mlx-qwen3-asr | Apple Silicon GPU 가속 | Apple MLX 커뮤니티와 관련 기여자 |
+| faster-whisper / CTranslate2 | CPU 전사 경로 | faster-whisper, CTranslate2 |
+| Ollama / Hy-MT2 GGUF | 선택적 일본어 -> 한국어 번역 | Ollama와 Hugging Face GGUF 모델 배포자 |
+
+모델과 주요 라이브러리의 라이선스 및 재배포 고지는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요.
 
 ## 프로젝트 구조
 
 ```text
 standalone/   권장 uv 기반 Windows 버전
-standalone-silicon/   Apple Silicon Mac 실험 버전
+standalone-silicon/   Apple Silicon Mac 버전
 docker/       기존 Docker watcher 버전
 sample/       짧은 테스트 미디어
 ```
-
-모델과 주요 라이브러리의 라이선스 및 재배포 고지는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요.
