@@ -2,7 +2,7 @@
 
 Language: [한국어](README.md) | **English**
 
-A local tool that extracts Japanese subtitles from media and can translate them into Korean with Ollama. New Windows installations should use the **Docker-free `standalone/` edition**; Apple Silicon Mac users should use `standalone-silicon/`.
+A local tool that extracts Japanese subtitles from media and can translate them into Korean with Ollama. It handles supported media such as `.mp4`, `.mkv`, and `.wmv`. New Windows installations should use the **Docker-free `standalone/` edition**; Apple Silicon Mac users should use `standalone-silicon/`.
 
 ## Easiest Windows Setup
 

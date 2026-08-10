@@ -63,7 +63,7 @@ Process one file:
 uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output"
 ```
 
-Process all supported media files directly inside one folder:
+Process all supported media files directly inside one folder, including `.mp4`, `.mkv`, and `.wmv`:
 
 ```powershell
 uv run --no-sync kotoba process "D:\Videos" --output-dir ".\tmp-output"

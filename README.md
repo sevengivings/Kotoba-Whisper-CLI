@@ -2,7 +2,7 @@
 
 언어: **한국어** | [English](README.en.md)
 
-일본어 영상에서 자막을 추출하고, 필요하면 Ollama로 한국어 자막까지 번역하는 로컬 도구입니다. 새로 설치하는 Windows 사용자에게는 **Docker가 필요 없는 `standalone/` 버전**, Apple Silicon Mac 사용자에게는 `standalone-silicon/` 버전을 권장합니다.
+일본어 영상에서 자막을 추출하고, 필요하면 Ollama로 한국어 자막까지 번역하는 로컬 도구입니다. `.mp4`, `.mkv`, `.wmv` 같은 지원 미디어를 처리할 수 있으며, 새로 설치하는 Windows 사용자에게는 **Docker가 필요 없는 `standalone/` 버전**, Apple Silicon Mac 사용자에게는 `standalone-silicon/` 버전을 권장합니다.
 
 ## 가장 쉬운 Windows 사용 방법
 

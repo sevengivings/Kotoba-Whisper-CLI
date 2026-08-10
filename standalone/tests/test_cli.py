@@ -18,12 +18,13 @@ def null_progress() -> Iterator[None]:
 
 def test_iter_media_files_defaults_to_top_level_only(tmp_path: Path) -> None:
     (tmp_path / "a.mp4").write_text("", encoding="utf-8")
+    (tmp_path / "b.wmv").write_text("", encoding="utf-8")
     (tmp_path / "b.txt").write_text("", encoding="utf-8")
     nested = tmp_path / "nested"
     nested.mkdir()
     (nested / "c.mkv").write_text("", encoding="utf-8")
 
-    assert cli.iter_media_files(tmp_path) == [tmp_path / "a.mp4"]
+    assert cli.iter_media_files(tmp_path) == [tmp_path / "a.mp4", tmp_path / "b.wmv"]
 
 
 def test_process_parser_defaults_to_pyannote(tmp_path: Path) -> None:

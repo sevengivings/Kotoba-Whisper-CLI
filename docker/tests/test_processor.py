@@ -32,6 +32,7 @@ class _Config:
 
 def test_supported_extensions_case_insensitive() -> None:
     assert is_supported_media(Path("sample.MP4"))
+    assert is_supported_media(Path("sample.WMV"))
     assert is_supported_media(Path("sample.wav"))
     assert not is_supported_media(Path("sample.txt"))
 

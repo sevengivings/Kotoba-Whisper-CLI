@@ -72,6 +72,10 @@ def test_ffmpeg_exe_prefers_configured_path(monkeypatch: pytest.MonkeyPatch, tmp
     assert media.ffmpeg_exe() == str(configured)
 
 
+def test_is_supported_media_accepts_wmv() -> None:
+    assert media.is_supported_media(Path("sample.WMV"))
+
+
 def test_ffmpeg_exe_rejects_missing_configured_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(media.FFMPEG_PATH_ENV, r"C:\missing\ffmpeg.exe")
 

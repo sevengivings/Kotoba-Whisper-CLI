@@ -131,7 +131,7 @@ docker logs --tail 50 kotoba-folder-watcher
 
 ## 사용 방법
 
-1. `input` 폴더에 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 같은 파일을 넣습니다.
+1. `input` 폴더에 `.mp4`, `.mkv`, `.wmv`, `.mp3`, `.wav`, `.m4a` 같은 파일을 넣습니다.
 2. 파일 크기와 수정 시간이 안정화되면 자동 처리됩니다.
 3. 처리 중 원본은 `processing`으로 이동합니다.
 4. 성공 시 원본은 `archive`, 실패 시 원본과 failure JSON은 `failed`로 이동합니다.
@@ -262,7 +262,7 @@ docker logs --tail 50 kotoba-folder-watcher
 ./process-dir.sh "/mnt/best" --translate
 ```
 
-`process-file.ps1`/`process-dir.ps1`과 `process-file.sh`/`process-dir.sh`는 기본적으로 완료까지 기다립니다. `-NoWait` 또는 `--no-wait`를 붙이면 파일을 `input` 폴더에 제출한 뒤 바로 종료합니다. Docker 컨테이너가 떠 있지 않으면 제출 전에 `docker compose up -d --build`로 먼저 시작합니다. Docker 데몬이 응답하지 않는 경우에는 명확한 오류를 보여줍니다. 기본 VAD는 pyannote입니다. `-SilenceThresholdDb` 또는 `-AutoSilenceThreshold`와 대응하는 bash 옵션을 명시한 작업만 이전 FFmpeg 음량 VAD로 전환됩니다. 두 옵션은 동시에 쓸 수 없습니다. `-MinSilenceDurationSeconds 0.4` 또는 `--min-silence-duration-seconds 0.4`는 pyannote의 최소 비음성 간격과 FFmpeg의 최소 무음 길이에 모두 적용됩니다. `process-dir` 스크립트는 기본적으로 `.mp4`, `.mkv`, `.mp3`, `.wav`, `.m4a` 등 지원 확장자만 복사합니다. 파일은 `.part`로 먼저 복사한 뒤 이름을 바꾸므로, watcher가 복사 중인 파일을 먼저 처리하지 않습니다.
+`process-file.ps1`/`process-dir.ps1`과 `process-file.sh`/`process-dir.sh`는 기본적으로 완료까지 기다립니다. `-NoWait` 또는 `--no-wait`를 붙이면 파일을 `input` 폴더에 제출한 뒤 바로 종료합니다. Docker 컨테이너가 떠 있지 않으면 제출 전에 `docker compose up -d --build`로 먼저 시작합니다. Docker 데몬이 응답하지 않는 경우에는 명확한 오류를 보여줍니다. 기본 VAD는 pyannote입니다. `-SilenceThresholdDb` 또는 `-AutoSilenceThreshold`와 대응하는 bash 옵션을 명시한 작업만 이전 FFmpeg 음량 VAD로 전환됩니다. 두 옵션은 동시에 쓸 수 없습니다. `-MinSilenceDurationSeconds 0.4` 또는 `--min-silence-duration-seconds 0.4`는 pyannote의 최소 비음성 간격과 FFmpeg의 최소 무음 길이에 모두 적용됩니다. `process-dir` 스크립트는 기본적으로 `.mp4`, `.mkv`, `.wmv`, `.mp3`, `.wav`, `.m4a` 등 지원 확장자만 복사합니다. 파일은 `.part`로 먼저 복사한 뒤 이름을 바꾸므로, watcher가 복사 중인 파일을 먼저 처리하지 않습니다.
 
 대기 중에는 `processing\<name>.progress.json`을 읽어 현재 단계를 표시합니다. 예를 들어 음성 추출, pyannote 음성 검출, VAD segment별 전사 진행률과 경과 시간이 표시됩니다. FFmpeg 호환 옵션을 지정한 경우에는 자동 무음 기준 분석과 무음 구간 탐지 단계가 대신 표시됩니다. 단일 파일 처리 또는 `process-dir`에서 남은 파일이 1개일 때는 같은 줄에서 갱신하고, 여러 파일이 남아 있으면 파일별 진행 상태를 여러 줄로 표시합니다.
 

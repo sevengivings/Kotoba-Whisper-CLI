@@ -112,7 +112,7 @@ uv run --no-sync kotoba process "..\sample\ja_short_test.mp4" --output-dir ".\tm
 uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output"
 ```
 
-폴더 안의 동영상을 한 번에 처리하려면:
+폴더 안의 동영상과 지원 미디어 파일(`.mp4`, `.mkv`, `.wmv` 등)을 한 번에 처리하려면:
 
 ```powershell
 uv run --no-sync kotoba process "D:\Videos" --output-dir ".\tmp-output"

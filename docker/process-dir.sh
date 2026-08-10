@@ -86,9 +86,9 @@ fi
 
 mapfile -d '' sources < <(
   if [[ "$RECURSE" == "true" ]]; then
-    find "$DIR_PATH" -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.m4v' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.mp3' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.flac' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' -o -iname '*.wma' \) -print0
+    find "$DIR_PATH" -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.m4v' -o -iname '*.wmv' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.mp3' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.flac' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' -o -iname '*.wma' \) -print0
   else
-    find "$DIR_PATH" -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.m4v' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.mp3' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.flac' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' -o -iname '*.wma' \) -print0
+    find "$DIR_PATH" -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.m4v' -o -iname '*.wmv' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.mp3' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.flac' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' -o -iname '*.wma' \) -print0
   fi | sort -z
 )
 

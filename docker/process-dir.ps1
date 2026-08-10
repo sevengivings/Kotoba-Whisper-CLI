@@ -39,7 +39,7 @@ param(
     [ValidateSet("polite", "banmal", "strict-banmal")]
     [string]$KoreanStyle = "polite",
 
-    [string[]]$Extensions = @(".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".m2ts", ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".opus", ".wma")
+    [string[]]$Extensions = @(".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".wmv", ".ts", ".m2ts", ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".opus", ".wma")
 )
 
 $ErrorActionPreference = "Stop"
