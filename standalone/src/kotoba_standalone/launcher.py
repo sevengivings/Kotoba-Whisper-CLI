@@ -15,6 +15,12 @@ from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Any
 
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+except Exception:
+    DND_FILES = None  # type: ignore[assignment]
+    TkinterDnD = None  # type: ignore[assignment]
+
 from kotoba_standalone.media import (
     AUDIO_EXTENSIONS,
     FFMPEG_PATH_ENV,
@@ -506,6 +512,23 @@ def media_filetypes() -> list[tuple[str, str]]:
     ]
 
 
+def create_launcher_root() -> Tk:
+    if TkinterDnD is not None:
+        try:
+            return TkinterDnD.Tk()
+        except Exception:
+            pass
+    return Tk()
+
+
+def dropped_paths_from_event(root: Tk, data: str) -> list[Path]:
+    try:
+        values = root.tk.splitlist(data)
+    except Exception:
+        values = data.split()
+    return [Path(value) for value in values if str(value).strip()]
+
+
 def is_subtitle_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() == ".srt"
 
@@ -827,7 +850,8 @@ class KotobaLauncher:
         form_pady = 3
 
         ttk.Label(outer, text="입력 영상 또는 폴더").grid(row=0, column=0, sticky="w", pady=form_pady)
-        ttk.Entry(outer, textvariable=self.input_path).grid(row=0, column=1, sticky="ew", padx=8, pady=form_pady)
+        self.input_entry = ttk.Entry(outer, textvariable=self.input_path)
+        self.input_entry.grid(row=0, column=1, sticky="ew", padx=8, pady=form_pady)
         ttk.Button(outer, text="파일 선택", command=self.choose_file).grid(row=0, column=2, padx=3, pady=form_pady)
         ttk.Button(outer, text="폴더 선택", command=self.choose_folder).grid(row=0, column=3, padx=3, pady=form_pady)
 
@@ -949,7 +973,32 @@ class KotobaLauncher:
         ttk.Button(status_actions, text="주소/포트 변경", command=self.change_ollama_server).grid(
             row=1, column=0, sticky="ew", pady=2
         )
+        self._configure_input_drop_targets(outer, self.input_entry)
         self._refresh_translation_controls()
+
+    def _configure_input_drop_targets(self, *widgets: Any) -> None:
+        if DND_FILES is None:
+            return
+        for widget in widgets:
+            try:
+                widget.drop_target_register(DND_FILES)
+                widget.dnd_bind("<<Drop>>", self._handle_input_drop)
+            except Exception:
+                continue
+
+    def _handle_input_drop(self, event: Any) -> str:
+        paths = dropped_paths_from_event(self.root, str(event.data))
+        if not paths:
+            messagebox.showwarning("입력 확인", "드롭한 파일 경로를 읽을 수 없습니다.")
+            return "break"
+        selected = paths[0]
+        validation_error = validate_input_path(selected)
+        if validation_error is not None:
+            messagebox.showwarning("입력 확인", validation_error)
+            return "break"
+        self.input_path.set(str(selected))
+        self._remember_state()
+        return "break"
 
     def choose_file(self) -> None:
         selected = filedialog.askopenfilename(
@@ -1623,7 +1672,7 @@ class OllamaServerDialog:
 
 
 def main() -> int:
-    root = Tk()
+    root = create_launcher_root()
     configure_theme(root)
     KotobaLauncher(root)
     root.mainloop()

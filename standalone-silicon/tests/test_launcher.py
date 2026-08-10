@@ -20,6 +20,7 @@ from kotoba_standalone.launcher import (
     copy_korean_subtitles_to_input_location,
     default_app_for_extension,
     default_model_device_for_backend,
+    dropped_paths_from_event,
     effective_model_device,
     estimate_work_text,
     existing_korean_subtitles,
@@ -42,6 +43,15 @@ from kotoba_standalone.launcher import (
     translate_button_presentation,
     validate_input_path,
 )
+
+
+class _FakeTk:
+    def splitlist(self, data: str) -> tuple[str, ...]:
+        return ("/Users/me/Video Clips/a sample.wmv", "/Users/me/Video Clips/second.mp4")
+
+
+class _FakeRoot:
+    tk = _FakeTk()
 
 
 def test_format_elapsed_korean() -> None:
@@ -346,6 +356,12 @@ def test_media_filetypes_include_video_and_audio_patterns() -> None:
     assert "*.mp4" in filetypes[0][1]
     assert "*.wav" in filetypes[0][1]
     assert "*.srt" in filetypes[0][1]
+
+
+def test_dropped_paths_from_event_uses_tk_splitlist_for_spaced_paths() -> None:
+    paths = dropped_paths_from_event(_FakeRoot(), "{/Users/me/Video Clips/a sample.wmv} {/Users/me/Video Clips/second.mp4}")
+
+    assert paths == [Path("/Users/me/Video Clips/a sample.wmv"), Path("/Users/me/Video Clips/second.mp4")]
 
 
 def test_validate_input_path_accepts_supported_media_file(tmp_path: Path) -> None:
