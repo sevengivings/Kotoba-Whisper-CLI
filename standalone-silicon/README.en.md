@@ -77,6 +77,20 @@ The first Qwen3-ASR MLX run can take longer while the selected model is download
 
 Korean translation controls stay disabled until the Ollama server and an installed translation model are verified. Click `Ollama Check` or `Ollama Models` in the GUI, then enable `Run Korean translation too`.
 
+## Updating An Existing Install
+
+If you already use this checkout, pull the latest code and sync the Python environment again. New features can add Python dependencies, so `git pull` alone may not be enough.
+
+```bash
+cd ~/Kotoba-Whisper-CLI
+git pull
+
+cd standalone-silicon
+uv sync
+```
+
+If your first install used options for `./install-silicon.sh`, you can rerun the installer with the same options when needed.
+
 ## CLI
 
 Short sample:

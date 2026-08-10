@@ -55,6 +55,20 @@ uv run --no-sync kotoba-launcher
 
 If Windows Smart App Control is enabled, it can block newly downloaded Python package `.dll` or `.pyd` files. Running as administrator may not bypass that policy; check Smart App Control in Windows Security if imports fail with an application-control message.
 
+## Updating An Existing Install
+
+If you already use this checkout, pull the latest code and sync the Python environment again. New features can add Python dependencies, so `git pull` alone may not be enough.
+
+```powershell
+cd C:\Python\Kotoba-Whisper-CLI
+git pull
+
+cd .\standalone
+uv sync --group transcribe --group cuda --group pyannote
+```
+
+If your first install pinned a specific Python 3.12 path, you can rerun `uv sync` with the same Python options you used during setup.
+
 ## Processing
 
 Process one file:

@@ -91,6 +91,20 @@ uv run --no-sync kotoba-launcher
 
 Windows Smart App Control이 켜져 있으면 새로 내려받은 Python 패키지의 `.dll` 또는 `.pyd` 파일이 차단될 수 있습니다. 이 경우 관리자 권한 실행만으로 해결되지 않을 수 있으며, Windows 보안의 Smart App Control 설정을 확인해야 합니다.
 
+## 기존 설치 업데이트
+
+이미 설치해서 사용 중인 경우에는 프로젝트를 최신 코드로 받은 뒤 Python 환경을 다시 동기화합니다. 새 기능이나 의존성이 추가된 경우 `git pull`만으로는 부족할 수 있습니다.
+
+```powershell
+cd C:\Python\Kotoba-Whisper-CLI
+git pull
+
+cd .\standalone
+uv sync --group transcribe --group cuda --group pyannote
+```
+
+설치할 때 Python 3.12 경로를 고정해서 사용했다면, 처음 설치 때와 같은 옵션으로 다시 동기화해도 됩니다.
+
 ## 5. 짧은 샘플로 자막 추출 테스트
 
 ```powershell

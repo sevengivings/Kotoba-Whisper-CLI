@@ -77,6 +77,20 @@ Qwen3-ASR MLX를 처음 선택하면 모델 다운로드 때문에 첫 실행 �
 
 한국어 번역 옵션은 Ollama 서버와 설치된 번역 모델이 확인되기 전까지 비활성화됩니다. GUI에서 `Ollama 확인` 또는 `Ollama 모델`을 눌러 모델을 확인한 뒤 `한국어 번역까지 실행`을 켜세요.
 
+## 기존 설치 업데이트
+
+이미 설치해서 사용 중인 경우에는 프로젝트를 최신 코드로 받은 뒤 Python 환경을 다시 동기화합니다. 새 기능이나 의존성이 추가된 경우 `git pull`만으로는 부족할 수 있습니다.
+
+```bash
+cd ~/Kotoba-Whisper-CLI
+git pull
+
+cd standalone-silicon
+uv sync
+```
+
+설치 시 `./install-silicon.sh`에 옵션을 붙여 사용했다면, 필요에 따라 같은 옵션으로 설치 스크립트를 다시 실행해도 됩니다.
+
 ## CLI 실행
 
 짧은 샘플:
