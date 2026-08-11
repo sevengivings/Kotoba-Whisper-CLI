@@ -58,6 +58,12 @@ uv run --no-sync kotoba process "D:\Videos\sample.mp4" --translate --translation
 
 Docker 버전의 코드, 실행 스크립트, 설정, 데이터 폴더는 모두 `docker/`에 있습니다.
 
+## 벤치마크
+
+`benchmark/`에는 실제 일본어 공개 음성으로 회귀 테스트용 클립을 만들고, 모델별 ASR 출력 결과를 비교하며, 두 모델이 크게 다르게 전사한 구간만 짧은 검수용 WAV로 잘라내는 도구가 있습니다.
+
+자세한 내용은 [benchmark 한국어 안내](benchmark/README.md) 또는 [benchmark English guide](benchmark/README.en.md)를 참고하세요.
+
 ## 사용한 모델과 감사
 
 이 프로젝트는 여러 공개 모델과 오픈소스 도구 위에 만들어졌습니다. 특히 아래 프로젝트와 커뮤니티에 감사드립니다.
@@ -81,4 +87,5 @@ standalone/   권장 uv 기반 Windows 버전
 standalone-silicon/   Apple Silicon Mac 버전
 docker/       기존 Docker watcher 버전
 sample/       짧은 테스트 미디어
+benchmark/    실제 음성 benchmark 및 ASR 비교 도구
 ```

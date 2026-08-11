@@ -40,6 +40,12 @@ The upstream license, model card, revision, and checksums are preserved in the [
 
 Docker code, scripts, configuration, data directories, and model cache all live in `docker/`.
 
+## Benchmark
+
+`benchmark/` contains utilities for building regression-test clips from public real-world Japanese audio, comparing ASR outputs from different models, and extracting short review WAVs only from regions where two models disagree strongly.
+
+See the [benchmark Korean guide](benchmark/README.md) or [benchmark English guide](benchmark/README.en.md) for details.
+
 ## Models And Thanks
 
 This project stands on several public models and open-source tools. Many thanks to the maintainers and communities behind them.

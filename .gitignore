@@ -17,6 +17,9 @@ __pycache__/
 /standalone-silicon/config/translation-defaults.json
 /standalone-silicon/config/launcher-state.json
 /standalone-silicon/models/
+/benchmark/cache/
+/benchmark/output/
+/sample/synthetic-v1/generated/
 /docker/input/*
 /docker/processing/*
 /docker/output/*

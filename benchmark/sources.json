@@ -1,0 +1,135 @@
+{
+  "version": "realworld-v1",
+  "sources": [
+    {
+      "id": "sakura_gakuin_interview",
+      "filename": "Sakura_Gakuin_Exclusive_Interview_with_Japanese_Station.webm",
+      "download_url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/Sakura_Gakuin_Exclusive_Interview_with_Japanese_Station.webm",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Sakura_Gakuin_Exclusive_Interview_with_Japanese_Station.webm",
+      "license": "CC-BY-3.0",
+      "attribution": "Japanese Station",
+      "notes": "Clip boundaries are provisional and should be reviewed before creating ground-truth transcripts.",
+      "clips": [
+        {
+          "id": "R01_fast_multi_interjections",
+          "start": "00:01:30",
+          "end": "00:08:00",
+          "tags": ["fast_dialogue", "turn_taking", "multi_speaker", "interjection", "laugh"],
+          "notes": "Merged from the original R01-R03 provisional Sakura clips because the shorter adjacent cuts were too similar.",
+          "selection_status": "provisional"
+        },
+        {
+          "id": "R02_natural_dialogue",
+          "start": "00:08:00",
+          "end": "00:10:00",
+          "tags": ["natural_dialogue", "multi_speaker"],
+          "selection_status": "provisional"
+        }
+      ]
+    },
+    {
+      "id": "yumeka_oda_interview",
+      "filename": "Skateboarding-Street-World-Championship-Tokyo-Japan-2023-12-17_Yumeka-Oda-Interview.webm",
+      "download_url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/Skateboarding-Street-World-Championship-Tokyo-Japan-2023-12-17_Yumeka-Oda-Interview.webm",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Skateboarding-Street-World-Championship-Tokyo-Japan-2023-12-17_Yumeka-Oda-Interview.webm",
+      "license": "CC-BY-4.0",
+      "attribution": "RuinDig / Yuki Uchida",
+      "clips": [
+        {
+          "id": "R03_noisy_female_interview",
+          "start": "00:00:00",
+          "end": "00:01:12",
+          "tags": ["interview", "female", "background_noise", "field_recording"],
+          "selection_status": "selected"
+        }
+      ]
+    },
+    {
+      "id": "sora_shirai_interview",
+      "filename": "Skateboarding-Street-World-Championship-Tokyo-Japan-2023-12-17_Sora-Shirai-Interview.webm",
+      "download_url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/Skateboarding-Street-World-Championship-Tokyo-Japan-2023-12-17_Sora-Shirai-Interview.webm",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Skateboarding-Street-World-Championship-Tokyo-Japan-2023-12-17_Sora-Shirai-Interview.webm",
+      "license": "CC-BY-4.0",
+      "attribution": "RuinDig / Yuki Uchida",
+      "clips": [
+        {
+          "id": "R04_noisy_male_interview",
+          "start": "00:00:00",
+          "end": "00:02:19",
+          "tags": ["interview", "male", "background_noise", "field_recording"],
+          "selection_status": "selected"
+        }
+      ]
+    },
+    {
+      "id": "job_interview",
+      "filename": "Job_Interview.webm",
+      "download_url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/Job_Interview.webm",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Job_Interview.webm",
+      "license": "CC-BY-SA-4.0",
+      "attribution": "Simpleshow Japan",
+      "clips": [
+        {
+          "id": "R05_clean_narration",
+          "start": "00:00:15",
+          "end": "00:02:45",
+          "tags": ["clean", "narration", "controlled_audio"],
+          "selection_status": "selected"
+        }
+      ]
+    },
+    {
+      "id": "japan_press_conference_20260119",
+      "filename": "20260119kaiken02.webm",
+      "download_url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/20260119kaiken02.webm",
+      "source_page": "https://commons.wikimedia.org/wiki/File:20260119kaiken02.webm",
+      "license": "CC-BY-4.0",
+      "attribution": "首相官邸 / 内閣官房内閣広報室",
+      "notes": "Only the opening formal monologue is selected for v1. Q&A timestamps should be reviewed later.",
+      "clips": [
+        {
+          "id": "R06_formal_monologue",
+          "start": "00:00:00",
+          "end": "00:03:00",
+          "tags": ["formal", "monologue", "clean_speech", "long_utterance"],
+          "selection_status": "selected"
+        }
+      ]
+    },
+    {
+      "id": "japanese_phrase_coffee_shop",
+      "filename": "Japanese_Phrase_of_the_Week_-_Season_2_-_Coffee_Shop_(1014705).webm",
+      "download_url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/Japanese_Phrase_of_the_Week_-_Season_2_-_Coffee_Shop_%281014705%29.webm",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Japanese_Phrase_of_the_Week_-_Season_2_-_Coffee_Shop_(1014705).webm",
+      "license": "Public Domain",
+      "attribution": "U.S. Navy AFN-T / Master Sgt. Timothy Dischinat",
+      "clips": [
+        {
+          "id": "R07_short_utterance",
+          "start": "00:00:00",
+          "end": "00:00:30",
+          "tags": ["short_utterance", "mixed_language", "phrase"],
+          "selection_status": "selected"
+        }
+      ]
+    },
+    {
+      "id": "japanese_macaques",
+      "filename": "Japanese_macaques.webm",
+      "download_url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/Japanese_macaques.webm",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Japanese_macaques.webm",
+      "license": "CC0-1.0",
+      "attribution": "ウィキ太郎",
+      "clips": [
+        {
+          "id": "N01_environment_no_speech",
+          "start": "00:00:00",
+          "end": "00:00:26",
+          "tags": ["non_speech", "environment", "hallucination_test"],
+          "expected_speech": false,
+          "selection_status": "selected"
+        }
+      ]
+    }
+  ]
+}
