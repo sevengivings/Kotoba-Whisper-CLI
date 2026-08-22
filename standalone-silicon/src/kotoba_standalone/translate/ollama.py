@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from kotoba_standalone.progress import ProgressCallback
+from kotoba_standalone.translation_profiles import TranslationProfile
 from kotoba_standalone.types import ProgressEvent, TranslationOptions, TranslationResult
 
 
@@ -82,7 +83,8 @@ def translate_srt(
 
     assert_ollama_model_available(options)
     output_srt = resolve_output_srt(input_srt, options.output)
-    entries = parse_srt(input_srt)
+    source_entries = parse_srt(input_srt)
+    entries, preprocessing = apply_translation_profile(source_entries, options.translation_profile)
     translated_texts = translate_entries(
         entries,
         options=options,
@@ -104,10 +106,15 @@ def translate_srt(
         "model": options.model,
         "source": options.source,
         "target": options.target,
+        "source_subtitle_count": len(source_entries),
         "subtitle_count": len(entries),
         "batch_translate": options.batch_translate,
         "batch_size": options.batch_size if options.batch_translate else None,
         "korean_style": options.korean_style,
+        "translation_profile": options.translation_profile.name if options.translation_profile else "없음",
+        "source_correction_count": preprocessing["source_correction_count"],
+        "filtered_subtitle_count": preprocessing["filtered_subtitle_count"],
+        "filtered_subtitles": preprocessing["filtered_subtitles"],
         "processing_seconds": processing_seconds,
     }
     metadata_path = output_srt.with_suffix(".translation.json")
@@ -263,6 +270,56 @@ def parse_srt(path: Path) -> list[dict[str, str]]:
     return entries
 
 
+def apply_translation_profile(
+    entries: list[dict[str, str]],
+    profile: TranslationProfile | None,
+) -> tuple[list[dict[str, str]], dict[str, object]]:
+    if profile is None:
+        return entries, {
+            "source_correction_count": 0,
+            "filtered_subtitle_count": 0,
+            "filtered_subtitles": [],
+        }
+
+    prepared: list[dict[str, str]] = []
+    correction_count = 0
+    filtered_subtitles: list[dict[str, object]] = []
+    for index, entry in enumerate(entries, 1):
+        text = entry["text"]
+        for rule in profile.corrections:
+            replacements = text.count(rule.source)
+            if replacements:
+                text = text.replace(rule.source, rule.target)
+                correction_count += replacements
+
+        matched_filter = next(
+            (
+                rule
+                for rule in profile.subtitle_filters
+                if (text.strip() == rule.pattern if rule.match == "exact" else rule.pattern in text)
+            ),
+            None,
+        )
+        if matched_filter is not None:
+            filtered_subtitles.append(
+                {
+                    "index": index,
+                    "text": text,
+                    "pattern": matched_filter.pattern,
+                    "match": matched_filter.match,
+                    "reason": matched_filter.note or "profile_rule",
+                }
+            )
+            continue
+        prepared.append({"timecode": entry["timecode"], "text": text})
+
+    return prepared, {
+        "source_correction_count": correction_count,
+        "filtered_subtitle_count": len(filtered_subtitles),
+        "filtered_subtitles": filtered_subtitles,
+    }
+
+
 def translate_entries(
     entries: list[dict[str, str]],
     options: TranslationOptions,
@@ -327,7 +384,17 @@ def translate_text_ollama(options: TranslationOptions, text: str) -> str:
     payload = {
         "model": options.model,
         "messages": [
-            {"role": "system", "content": build_system_prompt(options.source, options.target, batch_mode, options.korean_style)},
+            {
+                "role": "system",
+                "content": build_system_prompt(
+                    options.source,
+                    options.target,
+                    batch_mode,
+                    options.korean_style,
+                    options.translation_profile,
+                    text,
+                ),
+            },
             {"role": "user", "content": text},
         ],
         "stream": False,
@@ -347,14 +414,23 @@ def translate_text_ollama(options: TranslationOptions, text: str) -> str:
     return str(result.get("message", {}).get("content", "")).strip()
 
 
-def build_system_prompt(source_lang: str, target_lang: str, batch_mode: bool, korean_style: str = "polite") -> str:
+def build_system_prompt(
+    source_lang: str,
+    target_lang: str,
+    batch_mode: bool,
+    korean_style: str = "polite",
+    translation_profile: TranslationProfile | None = None,
+    source_text: str = "",
+) -> str:
     korean_style_prompt = _korean_style_prompt(target_lang, korean_style)
+    profile_prompt = build_translation_profile_prompt(translation_profile, source_text)
     if batch_mode:
         return (
             "You are a professional video subtitle translator. "
             f"Translate the following text from {source_lang} to {target_lang}. "
             f"{SUBTITLE_STYLE_PROMPT}"
             f"{korean_style_prompt}"
+            f"{profile_prompt}"
             "The input contains lines numbered [N]. "
             "Translate each line separately and prefix the output with the same [N]. "
             "Do not merge lines. Do not renumber lines. Output only the translated text."
@@ -364,9 +440,31 @@ def build_system_prompt(source_lang: str, target_lang: str, batch_mode: bool, ko
         f"Translate the following text from {source_lang} to {target_lang}. "
         f"{SUBTITLE_STYLE_PROMPT}"
         f"{korean_style_prompt}"
+        f"{profile_prompt}"
         "Ensure the translation is natural and conversational. "
         "Do not include any introductory, concluding remarks, or notes. Output only the translated text."
     )
+
+
+def build_translation_profile_prompt(
+    profile: TranslationProfile | None,
+    source_text: str = "",
+) -> str:
+    if profile is None:
+        return ""
+    parts: list[str] = []
+    if profile.instruction.strip():
+        parts.append(f"Additional translation instructions: {profile.instruction.strip()} ")
+    matched_terms = [term for term in profile.terms if term.source in source_text]
+    if matched_terms:
+        lines = [f"- {term.source} => {term.target}" for term in matched_terms]
+        parts.append(
+            "Use the following terminology references when they fit the sentence and context. "
+            "Do not blindly replace a word if that would make the Korean sentence unnatural or change its meaning:\n"
+            + "\n".join(lines)
+            + " "
+        )
+    return "\n".join(parts)
 
 
 def parse_batch_translation(result: str, batch: list[int]) -> dict[int, str]:

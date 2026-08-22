@@ -23,6 +23,12 @@ from kotoba_standalone.translate.ollama import (
     sort_ollama_models_for_translation,
     translation_model_label,
 )
+from kotoba_standalone.translation_profiles import (
+    SubtitleFilter,
+    TextCorrection,
+    TranslationProfile,
+    TranslationTerm,
+)
 from kotoba_standalone.types import TranslationOptions
 
 
@@ -107,6 +113,58 @@ def test_korean_prompt_can_request_strict_informal_style() -> None:
 
     assert "strict informal Korean speech style" in prompt
     assert "Translate each line separately" in prompt
+
+
+def test_translation_profile_prompt_uses_only_matching_terms() -> None:
+    profile = TranslationProfile(
+        name="애니메이션",
+        instruction="캐릭터의 말투를 유지한다.",
+        terms=(
+            TranslationTerm("先生", "선생님"),
+            TranslationTerm("魔法", "마법"),
+        ),
+    )
+
+    prompt = build_system_prompt(
+        "japanese",
+        "korean",
+        batch_mode=False,
+        translation_profile=profile,
+        source_text="先生、今日はどうしますか。",
+    )
+
+    assert "캐릭터의 말투를 유지한다." in prompt
+    assert "先生 => 선생님" in prompt
+    assert "魔法 => 마법" not in prompt
+    assert "Do not blindly replace" in prompt
+
+
+def test_translation_profile_corrects_source_and_filters_ghost_subtitles() -> None:
+    from kotoba_standalone.translate.ollama import apply_translation_profile
+
+    profile = TranslationProfile(
+        name="고급",
+        corrections=(TextCorrection("選手", "先生"),),
+    )
+    corrected, stats = apply_translation_profile(
+        [{"timecode": "00:00:00,000 --> 00:00:01,000", "text": "選手、こんにちは"}],
+        profile,
+    )
+
+    assert corrected[0]["text"] == "先生、こんにちは"
+    assert stats["source_correction_count"] == 1
+
+    profile = TranslationProfile(
+        name="고급",
+        subtitle_filters=(SubtitleFilter("ご視聴ありがとうございました", "contains"),),
+    )
+    filtered, stats = apply_translation_profile(
+        [{"timecode": "00:00:01,000 --> 00:00:02,000", "text": "ご視聴ありがとうございました！"}],
+        profile,
+    )
+
+    assert filtered == []
+    assert stats["filtered_subtitle_count"] == 1
 
 
 def test_check_ollama_available_reports_unreachable_server(monkeypatch: pytest.MonkeyPatch) -> None:

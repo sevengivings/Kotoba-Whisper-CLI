@@ -298,6 +298,7 @@ def test_build_process_command_adds_translation_options(tmp_path: Path) -> None:
             translate=True,
             translation_model="chosen:model",
             korean_style="strict-banmal",
+            translation_profile="AV",
             ollama_host="ollama.local",
             ollama_port=11435,
         )
@@ -306,6 +307,7 @@ def test_build_process_command_adds_translation_options(tmp_path: Path) -> None:
     assert "--translate" in command
     assert command[command.index("--translation-model") + 1] == "chosen:model"
     assert command[command.index("--korean-style") + 1] == "strict-banmal"
+    assert command[command.index("--translation-profile") + 1] == "AV"
     assert command[command.index("--ollama-host") + 1] == "ollama.local"
     assert command[command.index("--ollama-port") + 1] == "11435"
 
@@ -319,6 +321,7 @@ def test_build_translate_command_writes_to_output_dir(tmp_path: Path) -> None:
             output_dir=tmp_path / "out",
             translation_model="chosen:model",
             korean_style="banmal",
+            translation_profile="애니메이션",
             ollama_host="ollama.local",
             ollama_port=11435,
         ),
@@ -329,6 +332,7 @@ def test_build_translate_command_writes_to_output_dir(tmp_path: Path) -> None:
     assert command[command.index("--output") + 1] == str(tmp_path / "out")
     assert command[command.index("--model") + 1] == "chosen:model"
     assert command[command.index("--korean-style") + 1] == "banmal"
+    assert command[command.index("--translation-profile") + 1] == "애니메이션"
     assert command[command.index("--ollama-host") + 1] == "ollama.local"
     assert command[command.index("--ollama-port") + 1] == "11435"
 
@@ -863,6 +867,7 @@ def test_launcher_state_from_values(tmp_path: Path) -> None:
         "external_ffmpeg_path": "ffmpeg",
         "ollama_host": "ollama.local",
         "ollama_port": 11435,
+        "translation_profile": "없음",
         "asr_backend": "faster-kotoba",
     }
 

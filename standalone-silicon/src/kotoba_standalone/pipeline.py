@@ -566,6 +566,7 @@ def translation_options_from_process(options: ProcessOptions, output: Path | Non
         ollama_host=options.ollama_host,
         ollama_port=options.ollama_port,
         korean_style=options.korean_style,
+        translation_profile=options.translation_profile,
     )
 
 

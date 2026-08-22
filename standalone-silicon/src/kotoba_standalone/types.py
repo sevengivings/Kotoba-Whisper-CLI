@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from kotoba_standalone.translation_profiles import TranslationProfile
+
 
 KoreanStyle = Literal["polite", "banmal", "strict-banmal"]
 VadEngine = Literal["ffmpeg", "pyannote"]
@@ -63,6 +65,7 @@ class ProcessOptions:
     ollama_host: str = "localhost"
     ollama_port: int = 11434
     korean_style: KoreanStyle = "polite"
+    translation_profile: TranslationProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,7 @@ class TranslationOptions:
     text_split_size: int = 0
     timeout_seconds: int = 600
     korean_style: KoreanStyle = "polite"
+    translation_profile: TranslationProfile | None = None
 
 
 @dataclass(frozen=True)

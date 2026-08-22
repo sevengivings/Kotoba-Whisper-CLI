@@ -17,6 +17,7 @@ from kotoba_standalone.pipeline import process_video, validate_silence_threshold
 from kotoba_standalone.progress import tqdm_progress
 from kotoba_standalone.settings import DEFAULT_TRANSLATION_MODEL, load_saved_translation_model, save_translation_model
 from kotoba_standalone.subtitle import chunks_to_srt, parse_srt_chunks
+from kotoba_standalone.translation_profiles import get_translation_profile
 from kotoba_standalone.translate.ollama import (
     OllamaModelError,
     OllamaUnavailableError,
@@ -94,6 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
     process.add_argument("--ollama-host", default="localhost")
     process.add_argument("--ollama-port", type=int, default=11434)
     process.add_argument("--korean-style", choices=("polite", "banmal", "strict-banmal"), default="polite")
+    process.add_argument("--translation-profile", default="없음")
 
     translate = subparsers.add_parser("translate", help="Translate one SRT file with Ollama.")
     translate.add_argument("input_srt", type=Path)
@@ -111,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--text-split-size", type=int, default=0)
     translate.add_argument("--timeout-seconds", type=int, default=600)
     translate.add_argument("--korean-style", choices=("polite", "banmal", "strict-banmal"), default="polite")
+    translate.add_argument("--translation-profile", default="없음")
 
     align = subparsers.add_parser("align", help="Align an existing Japanese SRT with an existing WAV using WhisperX.")
     align.add_argument("input_srt", type=Path)
@@ -180,6 +183,7 @@ def standalone_root() -> Path:
 
 def run_process(args: argparse.Namespace) -> int:
     input_path = args.input.expanduser().resolve()
+    translation_profile = get_translation_profile(args.translation_profile)
     try:
         if args.translate or args.translation_model or args.translation_model_choice:
             translation_model = resolve_translation_model(
@@ -228,6 +232,7 @@ def run_process(args: argparse.Namespace) -> int:
         ollama_host=args.ollama_host,
         ollama_port=args.ollama_port,
         korean_style=args.korean_style,
+        translation_profile=translation_profile,
     )
 
     if input_path.is_dir():
@@ -290,6 +295,7 @@ def run_translate(args: argparse.Namespace) -> int:
         text_split_size=args.text_split_size,
         timeout_seconds=args.timeout_seconds,
         korean_style=args.korean_style,
+        translation_profile=get_translation_profile(args.translation_profile),
     )
     print(f"Translating: {args.input_srt}")
     print(f"Model: {model}")

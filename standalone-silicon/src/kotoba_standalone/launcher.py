@@ -40,6 +40,15 @@ from kotoba_standalone.settings import (
     load_saved_translation_model,
     save_launcher_state,
 )
+from kotoba_standalone.translation_profiles import (
+    DEFAULT_PROFILE_NAME,
+    SubtitleFilter,
+    TextCorrection,
+    TranslationProfile,
+    TranslationTerm,
+    load_translation_profiles,
+    save_translation_profiles,
+)
 from kotoba_standalone.translate.ollama import (
     OllamaModelError,
     OllamaUnavailableError,
@@ -58,6 +67,7 @@ class LauncherOptions:
     translate: bool = False
     translation_model: str = ""
     korean_style: str = "polite"
+    translation_profile: str = DEFAULT_PROFILE_NAME
     model_device: str = "cpu"
     asr_backend: str = "faster-kotoba"
     qwen_mlx_model_name: str = ""
@@ -71,6 +81,7 @@ class LauncherTranslationOptions:
     output_dir: Path
     translation_model: str = ""
     korean_style: str = "polite"
+    translation_profile: str = DEFAULT_PROFILE_NAME
     ollama_host: str = "localhost"
     ollama_port: int = 11434
 
@@ -133,6 +144,8 @@ def build_process_command(options: LauncherOptions) -> list[str]:
                 options.ollama_host,
                 "--ollama-port",
                 str(options.ollama_port),
+                "--translation-profile",
+                options.translation_profile,
             ]
         )
     return command
@@ -278,6 +291,8 @@ def build_translate_command(input_srt: Path, options: LauncherTranslationOptions
             options.ollama_host,
             "--ollama-port",
             str(options.ollama_port),
+            "--translation-profile",
+            options.translation_profile,
         ]
     )
     return command
@@ -553,6 +568,7 @@ def launcher_state_from_values(
     ollama_port: int = 11434,
     asr_backend: str = "faster-kotoba",
     install_root: Path | None = None,
+    translation_profile: str = DEFAULT_PROFILE_NAME,
 ) -> dict:
     root = install_root or standalone_root()
     return {
@@ -562,6 +578,7 @@ def launcher_state_from_values(
         "external_ffmpeg_path": ffmpeg_path,
         "ollama_host": ollama_host,
         "ollama_port": ollama_port,
+        "translation_profile": translation_profile or DEFAULT_PROFILE_NAME,
         "asr_backend": asr_backend
         if asr_backend in {"kotoba", "faster-kotoba", "kotoba-mlx", "qwen3", "qwen3-mlx", "qwen3-mlx-0.6b"}
         else "faster-kotoba",
@@ -878,8 +895,8 @@ class KotobaLauncher:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("Kotoba Standalone Silicon")
-        self.root.geometry("860x535")
-        self.root.minsize(820, 535)
+        self.root.geometry("860x590")
+        self.root.minsize(820, 590)
         self.events: queue.Queue[tuple[str, str | None]] = queue.Queue()
         self.process: subprocess.Popen[str] | None = None
         self.started_at: float | None = None
@@ -892,6 +909,7 @@ class KotobaLauncher:
         self.log_widget: ScrolledText | None = None
         self.app_root = standalone_root()
         state = load_launcher_state()
+        self.translation_profiles = load_translation_profiles()
         self.available_model_devices = available_model_devices()
         self.available_asr_backends = available_asr_backend_labels(self.available_model_devices)
         initial_asr_backend = coerce_asr_backend(str(state.get("asr_backend") or GUI_ASR_BACKEND), self.available_model_devices)
@@ -905,6 +923,10 @@ class KotobaLauncher:
         self.translate = BooleanVar(value=False)
         self.model = StringVar(value=load_saved_translation_model() or DEFAULT_TRANSLATION_MODEL)
         self.korean_style = StringVar(value="polite")
+        saved_profile = str(state.get("translation_profile") or DEFAULT_PROFILE_NAME)
+        if saved_profile not in self.translation_profiles:
+            saved_profile = DEFAULT_PROFILE_NAME
+        self.translation_profile = StringVar(value=saved_profile)
         self.model_device = StringVar(value=initial_model_device)
         self.asr_engine = StringVar(value=asr_backend_label(initial_asr_backend))
         self.external_ffmpeg_path = StringVar(value=str(state.get("external_ffmpeg_path") or ""))
@@ -922,6 +944,7 @@ class KotobaLauncher:
         self._build_ui()
         self.translate.trace_add("write", lambda *_args: self._refresh_derived_status())
         self.model.trace_add("write", lambda *_args: self._refresh_translation_controls())
+        self.translation_profile.trace_add("write", lambda *_args: self._remember_state())
         self.asr_engine.trace_add("write", lambda *_args: self._refresh_asr_engine_selection())
         self.input_path.trace_add("write", lambda *_args: self._refresh_derived_status())
         self.output_dir.trace_add("write", lambda *_args: self._refresh_derived_status())
@@ -982,8 +1005,25 @@ class KotobaLauncher:
         )
         self.korean_style_box.grid(row=4, column=1, sticky="w", padx=8, pady=form_pady)
 
+        self.translation_profile_label = ttk.Label(outer, text="번역 추가 설정")
+        self.translation_profile_label.grid(row=5, column=0, sticky="w", pady=form_pady)
+        self.translation_profile_box = ttk.Combobox(
+            outer,
+            textvariable=self.translation_profile,
+            values=tuple(self.translation_profiles),
+            state="readonly",
+            width=18,
+        )
+        self.translation_profile_box.grid(row=5, column=1, sticky="w", padx=8, pady=form_pady)
+        self.translation_profile_button = ttk.Button(
+            outer,
+            text="프로필 관리...",
+            command=self.open_translation_profile_dialog,
+        )
+        self.translation_profile_button.grid(row=5, column=2, columnspan=2, sticky="ew", padx=3, pady=form_pady)
+
         buttons = ttk.Frame(outer)
-        buttons.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(10, 8))
+        buttons.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(10, 8))
         buttons.columnconfigure(0, weight=1)
         self.translate_checkbutton = ttk.Checkbutton(buttons, text="한국어 번역까지 실행", variable=self.translate)
         self.translate_checkbutton.grid(row=0, column=1, padx=(0, 12))
@@ -999,7 +1039,7 @@ class KotobaLauncher:
         self.open_input_button.grid(row=0, column=6, padx=4)
 
         progress_panel = ttk.LabelFrame(outer, text="진행", padding=(10, 8))
-        progress_panel.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        progress_panel.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(4, 0))
         progress_panel.columnconfigure(1, weight=1)
         ttk.Label(progress_panel, text="처리 시간:", style="Panel.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
         ttk.Label(progress_panel, textvariable=self.status, style="Panel.TLabel").grid(row=0, column=1, sticky="w")
@@ -1025,7 +1065,7 @@ class KotobaLauncher:
         ttk.Button(log_buttons, text="로그 복사", command=self.copy_log).grid(row=1, column=0, sticky="ew")
 
         status_panel = ttk.LabelFrame(outer, text="상태", padding=(10, 6))
-        status_panel.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        status_panel.grid(row=8, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         status_panel.columnconfigure(0, weight=1)
         status_panel.columnconfigure(1, weight=0)
 
@@ -1200,6 +1240,26 @@ class KotobaLauncher:
     def change_ollama_server(self) -> None:
         OllamaServerDialog(self.root, self.ollama_host, self.ollama_port)
 
+    def open_translation_profile_dialog(self) -> None:
+        if self.process is not None or self.started_at is not None:
+            return
+        TranslationProfileDialog(
+            self.root,
+            self.translation_profiles,
+            self.translation_profile.get(),
+            on_save=self._on_translation_profiles_saved,
+        )
+
+    def _on_translation_profiles_saved(
+        self,
+        profiles: dict[str, TranslationProfile],
+        selected_name: str,
+    ) -> None:
+        self.translation_profiles = profiles
+        self.translation_profile_box.configure(values=tuple(profiles))
+        self.translation_profile.set(selected_name if selected_name in profiles else DEFAULT_PROFILE_NAME)
+        self._remember_state()
+
     def _on_ollama_model_selected(self, model: str) -> None:
         self.verified_translation_models.add(model)
         self.ollama_status.set(f"{ollama_server_text(self.ollama_host.get(), self._state_ollama_port())} (모델 선택됨)")
@@ -1240,6 +1300,7 @@ class KotobaLauncher:
             translate=self.translate.get(),
             translation_model=self.model.get(),
             korean_style=self.korean_style.get(),
+            translation_profile=self.translation_profile.get(),
             model_device=default_model_device_for_backend(asr_backend, self.available_model_devices),
             asr_backend=asr_backend,
             qwen_mlx_model_name=qwen_mlx_model_name_from_label(selected_label),
@@ -1293,6 +1354,7 @@ class KotobaLauncher:
             output_dir=output_dir,
             translation_model=self.model.get(),
             korean_style=self.korean_style.get(),
+            translation_profile=self.translation_profile.get(),
             ollama_host=self.ollama_host.get().strip() or "localhost",
             ollama_port=ollama_port,
         )
@@ -1608,6 +1670,7 @@ class KotobaLauncher:
                 self._state_ollama_port(),
                 asr_backend_storage_value(self.asr_engine.get()),
                 self.app_root,
+                translation_profile=self.translation_profile.get(),
             )
         )
 
@@ -1648,9 +1711,14 @@ class KotobaLauncher:
         self.translate_checkbutton.configure(state="normal" if ready and self.process is None and self.started_at is None else "disabled")
         self.translation_model_entry.configure(state="normal" if ready else "disabled")
         self.korean_style_box.configure(state="readonly" if ready else "disabled")
+        self.translation_profile_box.configure(state="readonly" if ready else "disabled")
+        self.translation_profile_button.configure(
+            state="normal" if self.process is None and self.started_at is None else "disabled"
+        )
         label_style = "TLabel" if ready else "DisabledField.TLabel"
         self.translation_model_label.configure(style=label_style)
         self.korean_style_label.configure(style=label_style)
+        self.translation_profile_label.configure(style=label_style)
         self._update_translate_button_state()
 
     def _update_translate_button_state(self) -> None:
@@ -1668,6 +1736,407 @@ class KotobaLauncher:
             translation_ready=self._translation_controls_ready(),
         )
         self.translate_button.configure(state=state, text=text)
+
+
+class TranslationProfileDialog:
+    def __init__(
+        self,
+        root: Tk,
+        profiles: dict[str, TranslationProfile],
+        selected_name: str,
+        on_save: Any,
+    ) -> None:
+        self.profiles = dict(profiles)
+        self.on_save = on_save
+        self.current_name = selected_name if selected_name in self.profiles else DEFAULT_PROFILE_NAME
+        self.current_terms: list[TranslationTerm] = []
+        self.selected_term_index: int | None = None
+
+        self.window = Toplevel(root)
+        dialog = self.window
+        dialog.title("번역 추가 설정 관리")
+        dialog.transient(root)
+        dialog.grab_set()
+        dialog.geometry("820x620")
+        dialog.minsize(720, 520)
+
+        frame = ttk.Frame(dialog, padding=12)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(1, weight=1)
+        frame.rowconfigure(3, weight=1)
+
+        ttk.Label(frame, text="프로필").grid(row=0, column=0, sticky="w", padx=(0, 10), pady=(0, 6))
+        self.profile_list = Listbox(frame, exportselection=False, width=18)
+        self.profile_list.grid(row=1, column=0, rowspan=4, sticky="nsew", padx=(0, 12))
+        self.profile_list.bind("<<ListboxSelect>>", self._select_profile)
+
+        details = ttk.Frame(frame)
+        details.grid(row=0, column=1, rowspan=5, sticky="nsew")
+        details.columnconfigure(1, weight=1)
+        details.rowconfigure(1, weight=1)
+
+        ttk.Label(details, text="프로필 이름").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
+        self.name_value = StringVar()
+        ttk.Entry(details, textvariable=self.name_value).grid(row=0, column=1, sticky="ew", pady=4)
+        notebook = ttk.Notebook(details)
+        notebook.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
+        translation_tab = ttk.Frame(notebook, padding=8)
+        advanced_tab = ttk.Frame(notebook, padding=8)
+        translation_tab.columnconfigure(0, weight=1)
+        translation_tab.rowconfigure(1, weight=1)
+        advanced_tab.columnconfigure(0, weight=1)
+        advanced_tab.rowconfigure(2, weight=1)
+        advanced_tab.rowconfigure(4, weight=1)
+        notebook.add(translation_tab, text="번역 기준")
+        notebook.add(advanced_tab, text="고급 설정")
+
+        instruction_header = ttk.Frame(translation_tab)
+        instruction_header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        instruction_header.columnconfigure(0, weight=1)
+        ttk.Label(
+            instruction_header,
+            text="지시사항은 문맥과 말투를 설명하고, 용어집은 번역 참고자료로 사용됩니다.",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            instruction_header,
+            text="클립보드 붙여넣기",
+            command=lambda: self._paste_from_clipboard(self.instruction),
+        ).grid(row=0, column=1, sticky="e")
+        self.instruction = ScrolledText(translation_tab, height=5, wrap="word")
+        self.instruction.grid(row=1, column=0, sticky="nsew")
+
+        glossary_header = ttk.Frame(translation_tab)
+        glossary_header.grid(row=2, column=0, sticky="ew", pady=(10, 4))
+        glossary_header.columnconfigure(0, weight=1)
+        ttk.Label(glossary_header, text="번역 참고 용어집  예: 先生 => 선생님 (또는 先生 -> 선생님)").grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            glossary_header,
+            text="용어집 붙여넣기",
+            command=self._paste_glossary_from_clipboard,
+        ).grid(row=0, column=1, sticky="e")
+        self.terms_tree = ttk.Treeview(translation_tab, columns=("source", "target", "note"), show="headings", height=7)
+        self.terms_tree.heading("source", text="원문")
+        self.terms_tree.heading("target", text="번역 참고")
+        self.terms_tree.heading("note", text="메모")
+        self.terms_tree.column("source", width=160)
+        self.terms_tree.column("target", width=160)
+        self.terms_tree.column("note", width=240)
+        self.terms_tree.grid(row=3, column=0, sticky="nsew")
+        self.terms_tree.bind("<<TreeviewSelect>>", self._select_term)
+
+        term_form = ttk.Frame(translation_tab)
+        term_form.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+        term_form.columnconfigure(1, weight=1)
+        term_form.columnconfigure(3, weight=1)
+        self.term_source = StringVar()
+        self.term_target = StringVar()
+        self.term_note = StringVar()
+        ttk.Label(term_form, text="원문").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        ttk.Entry(term_form, textvariable=self.term_source).grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        ttk.Label(term_form, text="번역").grid(row=0, column=2, sticky="w", padx=(0, 5))
+        ttk.Entry(term_form, textvariable=self.term_target).grid(row=0, column=3, sticky="ew")
+        ttk.Label(term_form, text="메모").grid(row=1, column=0, sticky="w", padx=(0, 5), pady=(5, 0))
+        ttk.Entry(term_form, textvariable=self.term_note).grid(row=1, column=1, columnspan=3, sticky="ew", pady=(5, 0))
+        term_buttons = ttk.Frame(term_form)
+        term_buttons.grid(row=2, column=0, columnspan=4, sticky="e", pady=(6, 0))
+        ttk.Button(term_buttons, text="용어 추가/수정", command=self.add_or_update_term).pack(side="left", padx=3)
+        ttk.Button(term_buttons, text="용어 삭제", command=self.delete_term).pack(side="left", padx=3)
+
+        ttk.Label(
+            advanced_tab,
+            text=(
+                "고급 설정은 번역 전에 일본어 원문에 적용됩니다. 비워 두면 아무 동작도 하지 않습니다.\n"
+                "한국어 번역 결과가 아니라, 번역 전 자막에 실제로 들어 있는 일본어 문구를 입력하세요."
+            ),
+        ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        correction_header = ttk.Frame(advanced_tab)
+        correction_header.grid(row=1, column=0, sticky="ew", pady=(0, 4))
+        correction_header.columnconfigure(0, weight=1)
+        ttk.Label(correction_header, text="원문 교정 규칙 (각 줄: 원문 => 교정문, 또는 ->)  예: 選手 => 先生").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Button(
+            correction_header,
+            text="클립보드 붙여넣기",
+            command=lambda: self._paste_from_clipboard(self.correction_rules),
+        ).grid(row=0, column=1, sticky="e")
+        self.correction_rules = ScrolledText(advanced_tab, height=4, wrap="word")
+        self.correction_rules.grid(row=2, column=0, sticky="nsew", pady=(0, 8))
+        filter_header = ttk.Frame(advanced_tab)
+        filter_header.grid(row=3, column=0, sticky="ew", pady=(0, 4))
+        filter_header.columnconfigure(0, weight=1)
+        ttk.Label(
+            filter_header,
+            text=(
+                "유령자막 필터 (각 줄: 정확히:문구 또는 포함:문구)\n"
+                "예: 정확히:ご視聴ありがとうございました\n"
+                "→ 한국어 결과가 ‘시청해주셔서 감사합니다’인 일본어 자막을 제외합니다."
+            ),
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            filter_header,
+            text="클립보드 붙여넣기",
+            command=lambda: self._paste_from_clipboard(self.filter_rules),
+        ).grid(row=0, column=1, sticky="e")
+        self.filter_rules = ScrolledText(advanced_tab, height=4, wrap="word")
+        self.filter_rules.grid(row=4, column=0, sticky="nsew")
+
+        profile_buttons = ttk.Frame(frame)
+        profile_buttons.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        ttk.Button(profile_buttons, text="새 프로필", command=self.new_profile).pack(side="left", padx=3)
+        ttk.Button(profile_buttons, text="프로필 복제", command=self.duplicate_profile).pack(side="left", padx=3)
+        ttk.Button(profile_buttons, text="프로필 삭제", command=self.delete_profile).pack(side="left", padx=3)
+        ttk.Button(profile_buttons, text="저장", command=self.save).pack(side="right", padx=3)
+        ttk.Button(profile_buttons, text="취소", command=dialog.destroy).pack(side="right", padx=3)
+
+        self._populate_profile_list(self.current_name)
+
+    def _populate_profile_list(self, selected: str) -> None:
+        self.profile_list.delete(0, "end")
+        names = tuple(self.profiles)
+        for name in names:
+            self.profile_list.insert("end", name)
+        if selected in names:
+            self.profile_list.selection_set(names.index(selected))
+            self.profile_list.see(names.index(selected))
+        self._load_profile(selected if selected in names else names[0])
+
+    def _load_profile(self, name: str) -> None:
+        profile = self.profiles[name]
+        self.current_name = name
+        self.name_value.set(profile.name)
+        self.instruction.delete("1.0", "end")
+        self.instruction.insert("1.0", profile.instruction)
+        self.correction_rules.delete("1.0", "end")
+        self.correction_rules.insert(
+            "1.0",
+            "\n".join(f"{rule.source} => {rule.target}" for rule in profile.corrections),
+        )
+        self.filter_rules.delete("1.0", "end")
+        self.filter_rules.insert(
+            "1.0",
+            "\n".join(
+                f"{rule.match}:{rule.pattern}" for rule in profile.subtitle_filters
+            ),
+        )
+        self.current_terms = list(profile.terms)
+        self.selected_term_index = None
+        self._refresh_terms()
+        self._clear_term_form()
+
+    def _commit_current(self) -> bool:
+        name = self.name_value.get().strip()
+        if not name:
+            messagebox.showwarning("프로필 이름", "프로필 이름을 입력해 주세요.")
+            return False
+        old_name = self.current_name
+        if name != old_name and name in self.profiles:
+            messagebox.showwarning("프로필 이름", "같은 이름의 프로필이 이미 있습니다.")
+            return False
+        corrections = self._parse_correction_rules()
+        filters = self._parse_filter_rules()
+        if corrections is None or filters is None:
+            return False
+        if name != old_name:
+            del self.profiles[old_name]
+        self.profiles[name] = TranslationProfile(
+            name=name,
+            instruction=self.instruction.get("1.0", "end").strip(),
+            terms=tuple(self.current_terms),
+            corrections=corrections,
+            subtitle_filters=filters,
+        )
+        self.current_name = name
+        return True
+
+    def _parse_correction_rules(self) -> tuple[TextCorrection, ...] | None:
+        rules: list[TextCorrection] = []
+        for line_no, raw_line in enumerate(self.correction_rules.get("1.0", "end").splitlines(), 1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            delimiter = "=>" if "=>" in line else "->" if "->" in line else ""
+            if not delimiter:
+                messagebox.showwarning("원문 교정", f"{line_no}번째 줄에 '=>' 또는 '->'가 없습니다.")
+                return None
+            source, target = (part.strip() for part in line.split(delimiter, 1))
+            if not source or not target:
+                messagebox.showwarning("원문 교정", f"{line_no}번째 줄의 원문과 교정문을 확인해 주세요.")
+                return None
+            rules.append(TextCorrection(source, target))
+        return tuple(rules)
+
+    def _paste_from_clipboard(self, widget: ScrolledText) -> None:
+        try:
+            clipboard_text = str(self.window.clipboard_get())
+        except Exception:
+            messagebox.showwarning("클립보드", "클립보드에서 텍스트를 읽을 수 없습니다.")
+            return
+        widget.focus_set()
+        widget.insert("insert", clipboard_text)
+
+    def _paste_glossary_from_clipboard(self) -> None:
+        try:
+            clipboard_text = str(self.window.clipboard_get())
+        except Exception:
+            messagebox.showwarning("클립보드", "클립보드에서 텍스트를 읽을 수 없습니다.")
+            return
+        parsed: list[TranslationTerm] = []
+        for line_no, raw_line in enumerate(clipboard_text.splitlines(), 1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            delimiter = "=>" if "=>" in line else "->" if "->" in line else ""
+            if delimiter:
+                source, target = (part.strip() for part in line.split(delimiter, 1))
+                note = ""
+            else:
+                columns = [column.strip() for column in raw_line.split("\t")]
+                if len(columns) < 2:
+                    messagebox.showwarning("용어집", f"{line_no}번째 줄을 '원문 => 번역' 또는 '원문 -> 번역' 형식으로 확인해 주세요.")
+                    return
+                source, target = columns[:2]
+                note = columns[2] if len(columns) > 2 else ""
+            if not source or not target:
+                messagebox.showwarning("용어집", f"{line_no}번째 줄의 원문과 번역을 확인해 주세요.")
+                return
+            parsed.append(TranslationTerm(source=source, target=target, note=note))
+        for term in parsed:
+            existing_index = next(
+                (index for index, current in enumerate(self.current_terms) if current.source == term.source),
+                None,
+            )
+            if existing_index is None:
+                self.current_terms.append(term)
+            else:
+                self.current_terms[existing_index] = term
+        self._refresh_terms()
+
+    def _parse_filter_rules(self) -> tuple[SubtitleFilter, ...] | None:
+        rules: list[SubtitleFilter] = []
+        for line_no, raw_line in enumerate(self.filter_rules.get("1.0", "end").splitlines(), 1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            match = "exact"
+            pattern = line
+            if ":" in line:
+                prefix, candidate = line.split(":", 1)
+                if prefix.strip().lower() in {"정확히", "exact", "포함", "contains"}:
+                    match = "contains" if prefix.strip().lower() in {"포함", "contains"} else "exact"
+                    pattern = candidate.strip()
+            if not pattern:
+                messagebox.showwarning("유령자막 필터", f"{line_no}번째 줄의 문구를 확인해 주세요.")
+                return None
+            rules.append(SubtitleFilter(pattern=pattern, match=match))
+        return tuple(rules)
+
+    def _select_profile(self, _event: object = None) -> None:
+        selection = self.profile_list.curselection()
+        if not selection:
+            return
+        names = tuple(self.profiles)
+        next_name = names[selection[0]]
+        if next_name == self.current_name:
+            return
+        if not self._commit_current():
+            self._populate_profile_list(self.current_name)
+            return
+        self._populate_profile_list(next_name)
+
+    def new_profile(self) -> None:
+        if not self._commit_current():
+            return
+        base = "새 프로필"
+        name = base
+        index = 2
+        while name in self.profiles:
+            name = f"{base} {index}"
+            index += 1
+        self.profiles[name] = TranslationProfile(name=name)
+        self._populate_profile_list(name)
+
+    def duplicate_profile(self) -> None:
+        if not self._commit_current():
+            return
+        source = self.profiles[self.current_name]
+        base = f"{source.name} - 복사본"
+        name = base
+        index = 2
+        while name in self.profiles:
+            name = f"{base} {index}"
+            index += 1
+        self.profiles[name] = TranslationProfile(
+            name=name,
+            instruction=source.instruction,
+            terms=source.terms,
+            corrections=source.corrections,
+            subtitle_filters=source.subtitle_filters,
+        )
+        self._populate_profile_list(name)
+
+    def delete_profile(self) -> None:
+        if self.current_name == DEFAULT_PROFILE_NAME:
+            messagebox.showinfo("프로필 삭제", "기본 프로필 '없음'은 삭제할 수 없습니다.")
+            return
+        if not messagebox.askyesno("프로필 삭제", f"'{self.current_name}' 프로필을 삭제할까요?"):
+            return
+        del self.profiles[self.current_name]
+        self._populate_profile_list(DEFAULT_PROFILE_NAME)
+
+    def _refresh_terms(self) -> None:
+        for item in self.terms_tree.get_children():
+            self.terms_tree.delete(item)
+        for index, term in enumerate(self.current_terms):
+            self.terms_tree.insert("", "end", iid=str(index), values=(term.source, term.target, term.note))
+
+    def _select_term(self, _event: object = None) -> None:
+        selection = self.terms_tree.selection()
+        if not selection:
+            return
+        index = int(selection[0])
+        if index >= len(self.current_terms):
+            return
+        term = self.current_terms[index]
+        self.selected_term_index = index
+        self.term_source.set(term.source)
+        self.term_target.set(term.target)
+        self.term_note.set(term.note)
+
+    def add_or_update_term(self) -> None:
+        source = self.term_source.get().strip()
+        target = self.term_target.get().strip()
+        if not source or not target:
+            messagebox.showwarning("용어집", "원문과 번역을 모두 입력해 주세요.")
+            return
+        term = TranslationTerm(source=source, target=target, note=self.term_note.get().strip())
+        if self.selected_term_index is None:
+            self.current_terms.append(term)
+        else:
+            self.current_terms[self.selected_term_index] = term
+        self._refresh_terms()
+        self._clear_term_form()
+
+    def delete_term(self) -> None:
+        if self.selected_term_index is None:
+            return
+        del self.current_terms[self.selected_term_index]
+        self._refresh_terms()
+        self._clear_term_form()
+
+    def _clear_term_form(self) -> None:
+        self.selected_term_index = None
+        self.term_source.set("")
+        self.term_target.set("")
+        self.term_note.set("")
+
+    def save(self) -> None:
+        if not self._commit_current():
+            return
+        save_translation_profiles(self.profiles)
+        self.on_save(self.profiles, self.current_name)
+        self.window.winfo_toplevel().destroy()
 
 
 class ModelDialog:
