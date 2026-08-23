@@ -867,10 +867,10 @@ class KotobaLauncher:
         self.root.after(100, self._drain_events)
 
     def _build_ui(self) -> None:
-        outer = ttk.Frame(self.root, padding=18)
+        outer = ttk.Frame(self.root, padding=(18, 10))
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(1, weight=1)
-        form_pady = 3
+        form_pady = 1
 
         ttk.Label(outer, text="입력 영상 또는 폴더").grid(row=0, column=0, sticky="w", pady=form_pady)
         self.input_entry = ttk.Entry(outer, textvariable=self.input_path)
