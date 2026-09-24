@@ -164,6 +164,18 @@ Default Qwen settings:
 
 For lower VRAM or speed comparisons, try `--qwen-model-name Qwen/Qwen3-ASR-0.6B`. This backend still needs Japanese adult-video sample validation, so treat it as a comparison tool for now.
 
+### Qwen Speaker-Aware Subtitles
+
+In the Windows GUI, selecting `Qwen3-ASR 1.7B` enables speaker diarization by default. The checkbox and speaker count (`Auto`, `2`, `3`, `4`, or `5`) are saved. The default Kotoba v2.2 model fails to generate word timestamps, and the faster CPU implementation does not request them; their GUI speaker controls are disabled.
+
+For the CLI, combine Qwen word timestamps with pyannote speaker diarization using these options. Omit `--num-speakers` to estimate the count automatically:
+
+```powershell
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output" --asr-backend qwen3 --model-dtype bfloat16 --diarize-speakers --num-speakers 3 --translate
+```
+
+Subtitles are split at detected speaker turns without adding speaker labels to the SRT. The speaker turns and the speaker assigned to each subtitle are saved in `*.speakers.json`. Accurate splitting requires word timestamps. The feature uses the bundled `pyannote/segmentation-3.0` model and downloads the public `pyannote/wespeaker-voxceleb-resnet34-LM` embedding model on first use. Overlapping speech and very short interjections may be assigned incorrectly.
+
 ### WhisperX Alignment Experiment (CLI Only)
 
 WhisperX alignment can re-align an existing Japanese SRT against the extracted WAV. It is intentionally hidden from the GUI while it remains experimental.

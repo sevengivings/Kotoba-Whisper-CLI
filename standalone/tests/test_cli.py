@@ -45,6 +45,16 @@ def test_process_parser_accepts_hidden_qwen_backend(tmp_path: Path) -> None:
     assert args.qwen_return_timestamps is True
 
 
+def test_process_parser_accepts_speaker_diarization(tmp_path: Path) -> None:
+    args = cli.build_parser().parse_args([
+        "process", str(tmp_path / "a.mp4"), "--asr-backend", "qwen3",
+        "--diarize-speakers", "--num-speakers", "3",
+    ])
+
+    assert args.diarize_speakers is True
+    assert args.num_speakers == 3
+
+
 def test_process_parser_accepts_hidden_faster_backend(tmp_path: Path) -> None:
     args = cli.build_parser().parse_args(["process", str(tmp_path / "a.mp4"), "--asr-backend", "faster-kotoba"])
 

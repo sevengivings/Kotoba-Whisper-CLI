@@ -56,7 +56,7 @@ def normalize_phrase(text: str) -> str:
     return normalized
 
 
-def normalize_chunks(raw_chunks: list[dict[str, Any]]) -> list[SubtitleChunk]:
+def normalize_chunks(raw_chunks: list[dict[str, Any]], *, deduplicate: bool = True) -> list[SubtitleChunk]:
     chunks: list[SubtitleChunk] = []
     previous_end = 0.0
     previous_text = ""
@@ -76,7 +76,7 @@ def normalize_chunks(raw_chunks: list[dict[str, Any]]) -> list[SubtitleChunk]:
             start = previous_end
             if end <= start:
                 end = start + 0.01
-        if text == previous_text:
+        if deduplicate and text == previous_text:
             continue
         chunks.append(SubtitleChunk(start, end, text))
         previous_end = end

@@ -71,6 +71,7 @@ class Qwen3Transcriber:
             return_time_stamps=self.options.qwen_return_timestamps,
         )
         first = result[0] if isinstance(result, list) else result
+        time_stamps = _value(first, "time_stamps") or _value(first, "timestamps")
         raw = qwen_result_to_raw(first, fallback_duration_s=wav_duration_seconds(wav_path))
         return TranscriptionResult(
             raw=raw,
@@ -78,7 +79,7 @@ class Qwen3Transcriber:
             device_name=self.device_name,
             torch_version=self.torch_version,
             torch_cuda_version=self.torch_cuda_version,
-            word_timestamps_used=bool(raw.get("chunks")),
+            word_timestamps_used=bool(qwen_timestamps_to_chunks(time_stamps)),
         )
 
 
@@ -113,6 +114,8 @@ def qwen_result_to_raw(result: Any, fallback_duration_s: float | None = None) ->
     language = _value(result, "language")
     time_stamps = _value(result, "time_stamps") or _value(result, "timestamps") or []
     chunks = qwen_timestamps_to_chunks(time_stamps)
+    if chunks:
+        chunks = attach_unaligned_text(str(text), chunks)
     if not chunks and text:
         chunks = [
             {
@@ -123,7 +126,28 @@ def qwen_result_to_raw(result: Any, fallback_duration_s: float | None = None) ->
     return {"text": str(text), "language": language, "chunks": chunks}
 
 
+def attach_unaligned_text(text: str, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep punctuation omitted by the Qwen forced aligner tokenizer."""
+    positions: list[tuple[int, int]] = []
+    cursor = 0
+    for chunk in chunks:
+        word = str(chunk["text"])
+        found = text.find(word, cursor)
+        if found < 0:
+            return chunks
+        positions.append((found, found + len(word)))
+        cursor = found + len(word)
+    result = [dict(chunk) for chunk in chunks]
+    result[0]["text"] = text[: positions[0][0]].strip() + result[0]["text"]
+    for index, (_, end) in enumerate(positions):
+        next_start = positions[index + 1][0] if index + 1 < len(positions) else len(text)
+        result[index]["text"] += text[end:next_start].strip()
+    return result
+
+
 def qwen_timestamps_to_chunks(time_stamps: Any) -> list[dict[str, Any]]:
+    # qwen-asr returns ForcedAlignResult(items=[...]), not a bare list.
+    time_stamps = _value(time_stamps, "items") or time_stamps
     if not isinstance(time_stamps, list):
         return []
     chunks: list[dict[str, Any]] = []

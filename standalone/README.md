@@ -244,6 +244,20 @@ uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-outpu
 
 VRAM이 부족하거나 속도 비교를 하고 싶다면 `--qwen-model-name Qwen/Qwen3-ASR-0.6B`를 지정해 볼 수 있습니다. 이 기능은 아직 일본어 AV 영상 기준 품질 검증 전이므로, 어려운 샘플에서 Kotoba 결과와 나란히 비교하는 용도입니다.
 
+### Qwen 화자 분리 자막
+
+Windows GUI에서 `Qwen3-ASR 1.7B`를 선택하면 화자 분리가 기본으로 켜집니다. `화자 분리 인원`은 `자동`, `2명`, `3명`, `4명`, `5명` 중 선택할 수 있고, 체크 상태와 인원 선택은 저장됩니다. 기본 Kotoba v2.2 모델의 단어별 시간 생성이 실패하고 faster CPU 구현도 단어별 시간을 반환하지 않아 두 엔진에서는 GUI 화자 분리를 사용할 수 없습니다.
+
+CLI에서는 다음 옵션을 직접 지정합니다. `--num-speakers`를 생략하면 인원은 자동 추정합니다.
+
+```powershell
+uv run --no-sync kotoba process "D:\Videos\sample.mp4" --output-dir ".\tmp-output" --asr-backend qwen3 --model-dtype bfloat16 --diarize-speakers --num-speakers 3 --translate
+```
+
+화자가 바뀔 때 자막을 나누며, SRT에는 화자 번호를 표시하지 않습니다. 감지된 화자 구간과 각 자막의 화자 번호는 `*.speakers.json`에 저장됩니다. 정확한 자막 분할에는 단어별 시간 정보가 필요합니다. 동시에 말하는 구간이나 짧은 감탄사의 화자는 틀릴 수 있습니다.
+
+사용하는 모델은 번들된 `pyannote/segmentation-3.0`과 공개된 `pyannote/wespeaker-voxceleb-resnet34-LM`입니다. 첫 실행 시 화자 음색 모델을 다운로드합니다.
+
 ### WhisperX 싱크 보정 실험(CLI 전용)
 
 WhisperX alignment는 이미 만들어진 일본어 자막의 시작 시간을 오디오에 다시 맞춰 보는 실험 기능입니다. GUI에는 표시하지 않습니다.

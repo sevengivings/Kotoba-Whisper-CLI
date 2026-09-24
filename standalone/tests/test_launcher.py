@@ -4,6 +4,9 @@ import json
 import sys
 import types
 from pathlib import Path
+from tkinter import TclError
+
+import pytest
 
 import kotoba_standalone.launcher as launcher
 from kotoba_standalone.launcher import (
@@ -35,6 +38,8 @@ from kotoba_standalone.launcher import (
     pending_translation_subtitles,
     estimate_history_text,
     recent_work_time_text,
+    speaker_count_from_label,
+    speaker_count_label,
     summarize_existing_translation,
     summarize_progress_line,
     translate_button_presentation,
@@ -75,6 +80,7 @@ def test_build_process_command_defaults_to_pyannote(tmp_path: Path) -> None:
     assert command[command.index("--vad-engine") + 1] == "pyannote"
     assert "--asr-backend" not in command
     assert "--translate" not in command
+    assert "--diarize-speakers" not in command
 
 
 def test_build_process_command_adds_qwen_backend(tmp_path: Path) -> None:
@@ -83,11 +89,50 @@ def test_build_process_command_adds_qwen_backend(tmp_path: Path) -> None:
             input_path=tmp_path / "sample.mp4",
             output_dir=tmp_path / "out",
             asr_backend="qwen3",
+            diarize_speakers=True,
         )
     )
 
     assert command[command.index("--asr-backend") + 1] == "qwen3"
     assert command[command.index("--model-dtype") + 1] == "bfloat16"
+    assert "--diarize-speakers" in command
+    assert "--num-speakers" not in command
+
+
+def test_build_process_command_uses_selected_speaker_count(tmp_path: Path) -> None:
+    command = build_process_command(
+        LauncherOptions(input_path=tmp_path / "sample.mp4", output_dir=tmp_path / "out", asr_backend="qwen3", diarize_speakers=True, num_speakers=3)
+    )
+    assert command[command.index("--num-speakers") + 1] == "3"
+
+
+def test_build_process_command_can_disable_qwen_diarization(tmp_path: Path) -> None:
+    command = build_process_command(
+        LauncherOptions(
+            input_path=tmp_path / "sample.mp4",
+            output_dir=tmp_path / "out",
+            asr_backend="qwen3",
+            diarize_speakers=False,
+            num_speakers=3,
+        )
+    )
+    assert "--diarize-speakers" not in command
+    assert "--num-speakers" not in command
+
+
+def test_build_process_command_omits_kotoba_diarization(tmp_path: Path) -> None:
+    command = build_process_command(
+        LauncherOptions(
+            input_path=tmp_path / "sample.mp4",
+            output_dir=tmp_path / "out",
+            asr_backend="kotoba",
+            diarize_speakers=True,
+            num_speakers=2,
+        )
+    )
+    assert "--asr-backend" not in command
+    assert "--diarize-speakers" not in command
+    assert "--num-speakers" not in command
 
 
 def test_build_process_command_adds_faster_backend(tmp_path: Path) -> None:
@@ -97,11 +142,67 @@ def test_build_process_command_adds_faster_backend(tmp_path: Path) -> None:
             output_dir=tmp_path / "out",
             model_device="cpu",
             asr_backend="faster-kotoba",
+            diarize_speakers=True,
+            num_speakers=3,
         )
     )
 
     assert command[command.index("--asr-backend") + 1] == "faster-kotoba"
     assert "--model-dtype" not in command
+    assert "--diarize-speakers" not in command
+    assert "--num-speakers" not in command
+
+
+def test_speaker_count_labels() -> None:
+    assert speaker_count_from_label("자동") is None
+    assert speaker_count_from_label("5명") == 5
+    assert speaker_count_label(None) == "자동"
+    assert speaker_count_label(2) == "2명"
+
+
+def test_qwen_speaker_controls_follow_engine_and_checkbox(monkeypatch) -> None:
+    saved: list[dict] = []
+    monkeypatch.setattr(launcher, "load_launcher_state", lambda: {"asr_backend": "qwen3"})
+    monkeypatch.setattr(launcher, "save_launcher_state", saved.append)
+    monkeypatch.setattr(launcher, "available_model_devices", lambda: ("cuda:0", "cpu"))
+    try:
+        root = launcher.Tk()
+    except TclError:
+        pytest.skip("Tk display unavailable")
+    root.withdraw()
+    try:
+        gui = launcher.KotobaLauncher(root)
+        assert gui.diarize_speakers.get() is True
+        assert gui.speaker_count_value.get() == "자동"
+        assert str(gui.speaker_checkbutton.cget("state")) == "normal"
+        assert str(gui.speaker_count_box.cget("state")) == "readonly"
+
+        gui.speaker_count_value.set("3명")
+        gui.diarize_speakers.set(False)
+        assert str(gui.speaker_count_box.cget("state")) == "disabled"
+        assert saved[-1]["diarize_speakers"] is False
+        assert saved[-1]["speaker_count"] == 3
+
+        gui.asr_engine.set(asr_backend_label("kotoba"))
+        assert str(gui.speaker_checkbutton.cget("state")) == "disabled"
+        assert gui.diarize_speakers.get() is False
+        gui.asr_engine.set(asr_backend_label("qwen3"))
+        assert str(gui.speaker_checkbutton.cget("state")) == "normal"
+        assert gui.diarize_speakers.get() is False
+        assert gui.speaker_count_value.get() == "3명"
+        gui.diarize_speakers.set(True)
+        assert str(gui.speaker_count_box.cget("state")) == "readonly"
+        gui.asr_engine.set(asr_backend_label("faster-kotoba"))
+        assert str(gui.speaker_checkbutton.cget("state")) == "disabled"
+        gui.asr_engine.set(asr_backend_label("qwen3"))
+        gui._set_running_buttons()
+        assert str(gui.speaker_checkbutton.cget("state")) == "disabled"
+        assert str(gui.speaker_count_box.cget("state")) == "disabled"
+        gui._set_idle_buttons()
+        assert str(gui.speaker_checkbutton.cget("state")) == "normal"
+        assert str(gui.speaker_count_box.cget("state")) == "readonly"
+    finally:
+        root.destroy()
 
 
 def test_asr_backend_label_helpers() -> None:
@@ -730,6 +831,8 @@ def test_launcher_state_from_values(tmp_path: Path) -> None:
         "ollama_port": 11435,
         "translation_profile": "없음",
         "asr_backend": "kotoba",
+        "diarize_speakers": True,
+        "speaker_count": None,
     }
 
 

@@ -26,6 +26,13 @@ from kotoba_standalone.media import (
 from kotoba_standalone.pyannote_vad import PyannoteVadError, detect_speech_spans_pyannote
 from kotoba_standalone.faster_transcriber import FasterKotobaTranscriber
 from kotoba_standalone.qwen_transcriber import Qwen3Transcriber
+from kotoba_standalone.speaker_diarization import (
+    SpeakerDiarizationError,
+    diarize_speakers_pyannote,
+    group_chunks_by_speaker,
+    speaker_for_chunk,
+    turns_to_json,
+)
 from kotoba_standalone.progress import ProgressCallback
 from kotoba_standalone.subtitle import (
     analyze_subtitle_quality,
@@ -71,7 +78,11 @@ def process_video(
     quality_json_path = output_dir / f"{input_path.stem}.subtitle-quality.json"
     whisperx_srt_path = output_dir / f"{input_path.stem}.whisperx.ja.srt"
     whisperx_json_path = output_dir / f"{input_path.stem}.whisperx-align.json"
+    speaker_json_path = output_dir / f"{input_path.stem}.speakers.json"
     wav_path = output_dir / f"{input_path.stem}.standalone.wav"
+
+    if options.num_speakers is not None and options.num_speakers < 1:
+        raise ValueError("num_speakers must be positive")
 
     progress_total = 12 if options.translate and options.alignment_engine == "whisperx" else 11 if options.translate or options.alignment_engine == "whisperx" else 10
     _emit(progress, started, "prepare", "Preparing input", 1, progress_total)
@@ -168,6 +179,24 @@ def process_video(
         _emit(progress, started, "detect_speech", f"pyannote found {len(spans)} speech span(s)", 5, progress_total)
     elif options.vad_engine not in {"ffmpeg", "pyannote"}:
         raise ValueError(f"Unsupported VAD engine: {options.vad_engine}")
+    speaker_diarization = None
+    if options.diarize_speakers and not pyannote_no_speech:
+        _emit(progress, started, "speaker_diarization", "Detecting speaker turns", 6, progress_total)
+        try:
+            speaker_diarization = diarize_speakers_pyannote(
+                wav_path, device=options.model_device, num_speakers=options.num_speakers
+            )
+        except SpeakerDiarizationError as exc:
+            return ProcessResult(
+                input_path=input_path,
+                output_dir=output_dir,
+                wav_path=wav_path,
+                ja_srt_path=None,
+                ko_srt_path=None,
+                copied_ko_srt_path=None,
+                status="diarization_error",
+                message=str(exc),
+            )
     if pyannote_no_speech:
         _emit(progress, started, "load_model", f"No speech found; skipping {options.asr_backend} model", 6, progress_total)
     else:
@@ -198,6 +227,7 @@ def process_video(
 
     segment_count = 1
     transcription = None
+    word_timestamps_used = False
     if pyannote_no_speech:
         raw_chunks = []
         raw_output = {"chunks": []}
@@ -206,6 +236,7 @@ def process_video(
         assert transcriber is not None
         _emit(progress, started, "transcribe", "Transcribing VAD segments", 7, progress_total)
         raw_chunks = []
+        word_timestamps_used = True
         segment_count = len(spans)
         for index, span in enumerate(spans, 1):
             _emit(progress, started, "transcribe_segments", f"Transcribing VAD segment {index}/{len(spans)}", index, len(spans))
@@ -213,7 +244,10 @@ def process_video(
             try:
                 extract_audio_segment(wav_path, segment_path, span.start, span.end)
                 transcription = transcriber.transcribe(str(segment_path))
-                raw_chunks.extend(offset_raw_chunks(extract_raw_chunks(transcription.raw), span.start))
+                segment_chunks = extract_raw_chunks(transcription.raw)
+                if segment_chunks:
+                    word_timestamps_used &= transcription.word_timestamps_used
+                    raw_chunks.extend(offset_raw_chunks(segment_chunks, span.start))
             finally:
                 segment_path.unlink(missing_ok=True)
         raw_output = {"chunks": raw_chunks}
@@ -221,6 +255,7 @@ def process_video(
         assert transcriber is not None
         _emit(progress, started, "transcribe", "Transcribing audio", 7, progress_total)
         transcription = transcriber.transcribe(str(wav_path))
+        word_timestamps_used = transcription.word_timestamps_used
         raw_chunks = extract_raw_chunks(transcription.raw)
         raw_output = transcription.raw
 
@@ -228,10 +263,27 @@ def process_video(
         assert transcriber is not None
         _emit(progress, started, "transcribe", "Transcribing audio", 7, progress_total)
         transcription = transcriber.transcribe(str(wav_path))
+        word_timestamps_used = transcription.word_timestamps_used
         raw_chunks = extract_raw_chunks(transcription.raw)
         raw_output = transcription.raw
     _emit(progress, started, "postprocess", "Writing Japanese subtitles", 8, progress_total)
-    chunks = group_chunks_by_timing(normalize_chunks(raw_chunks))
+    if speaker_diarization is not None and raw_chunks and not word_timestamps_used:
+        return ProcessResult(
+            input_path=input_path,
+            output_dir=output_dir,
+            wav_path=wav_path,
+            ja_srt_path=None,
+            ko_srt_path=None,
+            copied_ko_srt_path=None,
+            status="alignment_error",
+            message="Speaker-aware subtitles require word timestamps from the ASR backend.",
+        )
+    normalized_chunks = normalize_chunks(raw_chunks, deduplicate=not word_timestamps_used)
+    chunks = (
+        group_chunks_by_speaker(normalized_chunks, speaker_diarization.turns)
+        if speaker_diarization is not None
+        else group_chunks_by_timing(normalized_chunks)
+    )
     quality_issues = []
     if options.report_subtitle_quality or options.drop_likely_hallucinations:
         quality_issues = analyze_subtitle_quality(chunks, wav_path)
@@ -286,6 +338,30 @@ def process_video(
             encoding="utf-8",
         )
     srt_chunks = annotate_chunks_with_quality(chunks, quality_issues) if options.annotate_subtitle_quality else chunks
+    if speaker_diarization is not None:
+        speaker_json_path.write_text(
+            json.dumps(
+                {
+                    "model": speaker_diarization.model,
+                    "embedding": speaker_diarization.embedding,
+                    "requested_speaker_count": options.num_speakers,
+                    "detected_speaker_count": speaker_diarization.speaker_count,
+                    "turns": turns_to_json(speaker_diarization.turns),
+                    "subtitles": [
+                        {
+                            "index": index,
+                            "start": round(chunk.start, 3),
+                            "end": round(chunk.end, 3),
+                            "speaker": speaker_for_chunk(chunk, speaker_diarization.turns),
+                        }
+                        for index, chunk in enumerate(chunks, 1)
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
     ja_srt_path.write_text(chunks_to_srt(srt_chunks), encoding="utf-8")
     ja_txt_path.write_text(chunks_to_txt(chunks), encoding="utf-8")
     ja_aligned_srt_path = None
@@ -331,7 +407,7 @@ def process_video(
                 "torch_version": transcription.torch_version if transcription is not None else None,
                 "torch_cuda_version": transcription.torch_cuda_version if transcription is not None else None,
                 "batch_size_used": transcription.batch_size_used if transcription is not None else None,
-                "word_timestamps_used": transcription.word_timestamps_used if transcription is not None else False,
+                "word_timestamps_used": word_timestamps_used,
                 "asr_backend": options.asr_backend,
                 "asr_model": _asr_model_name(options),
                 "qwen_aligner_model": options.qwen_aligner_model if options.asr_backend == "qwen3" else None,
@@ -367,6 +443,8 @@ def process_video(
                 "vad_report": str(vad_json_path) if pyannote_vad is not None else None,
                 "vad_pre_split": options.vad_pre_split,
                 "transcription_segment_count": segment_count,
+                "speaker_diarization_report": str(speaker_json_path) if speaker_diarization is not None else None,
+                "speaker_count": speaker_diarization.speaker_count if speaker_diarization is not None else None,
                 "subtitle_count": len(chunks),
                 "alignment_engine": options.alignment_engine,
                 "whisperx_aligned_srt": str(ja_aligned_srt_path) if ja_aligned_srt_path is not None else None,
@@ -414,6 +492,8 @@ def process_video(
         message = f"{message}; copied Korean subtitle to: {copied_ko_srt_path}"
     if ja_aligned_srt_path is not None:
         message = f"{message}; WhisperX aligned Japanese subtitle: {ja_aligned_srt_path}"
+    if speaker_diarization is not None:
+        message = f"{message}; speaker turns: {speaker_json_path}"
     _emit(progress, started, "done", "Standalone transcription completed", progress_total, progress_total)
     return ProcessResult(
         input_path=input_path,

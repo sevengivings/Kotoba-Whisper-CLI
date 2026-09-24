@@ -46,6 +46,8 @@ class ProcessOptions:
     qwen_model_name: str = "Qwen/Qwen3-ASR-1.7B"
     qwen_aligner_model: str = "Qwen/Qwen3-ForcedAligner-0.6B"
     qwen_return_timestamps: bool = True
+    diarize_speakers: bool = False
+    num_speakers: int | None = None
     faster_model_name: str = "RoachLin/kotoba-whisper-v2.2-faster"
     report_subtitle_quality: bool = False
     drop_likely_hallucinations: bool = False

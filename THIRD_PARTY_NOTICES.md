@@ -77,6 +77,14 @@ Apache 2.0 모델을 재배포하는 경우 일반적으로 다음을 지켜야 
 - 기본 번들 모델은 로컬에서 직접 로드하므로 최종 사용자의 Hugging Face 계정이나 토큰이 필요하지 않습니다.
 - 사용자가 `--pyannote-model`로 다른 원격 gated 모델을 지정하면 해당 모델의 접근 조건과 인증은 별도로 적용됩니다.
 
+### pyannote WeSpeaker speaker embedding
+
+- 사용 위치: standalone CLI의 선택적 화자 분리 기능
+- 모델 ID: `pyannote/wespeaker-voxceleb-resnet34-LM`
+- 출처: https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM
+- 모델 카드에 표시된 라이선스: CC BY 4.0
+- 가중치는 저장소에 포함하지 않으며, 사용 시 Hugging Face에서 내려받습니다.
+
 ### WhisperX alignment 실험
 
 - 사용 위치: standalone CLI의 선택적 자막 싱크 보정 실험

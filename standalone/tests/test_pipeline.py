@@ -11,6 +11,7 @@ from kotoba_standalone.alignment import WhisperXAlignmentResult
 from kotoba_standalone.media import SilenceSpan
 from kotoba_standalone.pipeline import process_video, tail_retranscribe_long_subtitles, validate_silence_threshold
 from kotoba_standalone.pyannote_vad import PyannoteVadDependencyError, PyannoteVadResult
+from kotoba_standalone.speaker_diarization import SpeakerDiarizationResult, SpeakerTurn
 from kotoba_standalone.subtitle import SubtitleChunk, SubtitleQualityIssue
 from kotoba_standalone.transcriber import TranscriptionDependencyError
 from kotoba_standalone.types import ProcessOptions, ProgressEvent
@@ -115,6 +116,62 @@ def test_process_video_uses_qwen_backend_metadata(tmp_path: Path, monkeypatch: p
     assert process_meta["asr_backend"] == "qwen3"
     assert process_meta["asr_model"] == "Qwen/Qwen3-ASR-1.7B"
     assert process_meta["qwen_aligner_model"] == "Qwen/Qwen3-ForcedAligner-0.6B"
+
+
+@pytest.mark.parametrize(
+    ("asr_backend", "transcriber_name"),
+    [("qwen3", "Qwen3Transcriber"), ("kotoba", "KotobaTranscriber")],
+)
+def test_process_video_splits_subtitles_at_speaker_turns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asr_backend: str, transcriber_name: str
+) -> None:
+    class FakeWordTranscriber:
+        def __init__(self, options: ProcessOptions) -> None:
+            pass
+
+        def load(self) -> None:
+            pass
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            result = FakeResult()
+            result.raw = {"chunks": [
+                {"timestamp": [0.0, 0.4], "text": "hello"},
+                {"timestamp": [0.5, 0.9], "text": "there"},
+            ]}
+            result.word_timestamps_used = True
+            return result
+
+    def fake_diarize(*args: object, **kwargs: object) -> SpeakerDiarizationResult:
+        assert kwargs["num_speakers"] == 2
+        return SpeakerDiarizationResult(
+            turns=[SpeakerTurn(0.0, 0.45, "SPEAKER_00"), SpeakerTurn(0.45, 1.0, "SPEAKER_01")],
+            model="test model",
+            embedding="test embedding",
+            speaker_count=2,
+        )
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, transcriber_name, FakeWordTranscriber)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
+    monkeypatch.setattr(pipeline, "diarize_speakers_pyannote", fake_diarize)
+
+    result = process_video(
+        media,
+        ProcessOptions(
+            output_dir=tmp_path / "out",
+            vad_engine="ffmpeg",
+            asr_backend=asr_backend,
+            diarize_speakers=True,
+            num_speakers=2,
+        ),
+    )
+
+    assert result.status == "success"
+    srt = result.ja_srt_path.read_text(encoding="utf-8")
+    assert "hello\n\n2\n" in srt
+    assert "there" in srt
+    report = json.loads((tmp_path / "out" / "ja_short_test.speakers.json").read_text(encoding="utf-8"))
+    assert [item["speaker"] for item in report["subtitles"]] == ["SPEAKER_00", "SPEAKER_01"]
 
 
 def test_process_video_uses_faster_backend_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -326,6 +383,53 @@ def test_process_video_offsets_vad_segment_timestamps(tmp_path: Path, monkeypatc
     assert raw["chunks"][1]["timestamp"] == [2.2, 2.7]
     process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
     assert process_meta["transcription_segment_count"] == 2
+
+
+def test_speaker_diarization_rejects_mixed_word_and_segment_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeTranscriber:
+        calls = 0
+
+        def __init__(self, options: ProcessOptions) -> None:
+            pass
+
+        def load(self) -> None:
+            pass
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            self.calls += 1
+            result = FakeResult(0.1, 0.5, f"word {self.calls}")
+            result.word_timestamps_used = self.calls == 1
+            return result
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, "KotobaTranscriber", FakeTranscriber)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [SilenceSpan(1.0, 2.0)])
+    monkeypatch.setattr(
+        pipeline,
+        "speech_spans_from_silences",
+        lambda *args: [SilenceSpan(0.0, 1.0), SilenceSpan(2.0, 3.0)],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "diarize_speakers_pyannote",
+        lambda *args, **kwargs: SpeakerDiarizationResult(
+            turns=[SpeakerTurn(0.0, 3.0, "SPEAKER_00")],
+            model="test model",
+            embedding="test embedding",
+            speaker_count=1,
+        ),
+    )
+
+    result = process_video(
+        media,
+        ProcessOptions(output_dir=tmp_path / "out", vad_engine="ffmpeg", diarize_speakers=True),
+    )
+
+    assert result.status == "alignment_error"
+    assert result.ja_srt_path is None
+    assert "require word timestamps" in result.message
 
 
 def test_process_video_uses_pyannote_speech_spans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

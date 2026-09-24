@@ -81,6 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
     process.add_argument("--qwen-model-name", default="Qwen/Qwen3-ASR-1.7B", help=argparse.SUPPRESS)
     process.add_argument("--qwen-aligner-model", default="Qwen/Qwen3-ForcedAligner-0.6B", help=argparse.SUPPRESS)
     process.add_argument("--no-qwen-timestamps", dest="qwen_return_timestamps", action="store_false", help=argparse.SUPPRESS)
+    process.add_argument("--diarize-speakers", action="store_true", help="Separate subtitles at detected speaker turns")
+    process.add_argument("--num-speakers", type=int, help="Known speaker count for diarization")
     process.add_argument("--report-subtitle-quality", action="store_true")
     process.add_argument("--drop-likely-hallucinations", action="store_true")
     process.add_argument("--split-long-subtitles", action="store_true")
@@ -219,6 +221,8 @@ def run_process(args: argparse.Namespace) -> int:
         qwen_model_name=args.qwen_model_name,
         qwen_aligner_model=args.qwen_aligner_model,
         qwen_return_timestamps=args.qwen_return_timestamps,
+        diarize_speakers=args.diarize_speakers,
+        num_speakers=args.num_speakers,
         report_subtitle_quality=args.report_subtitle_quality,
         drop_likely_hallucinations=args.drop_likely_hallucinations,
         split_long_subtitles=args.split_long_subtitles,

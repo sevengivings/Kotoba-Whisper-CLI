@@ -65,6 +65,8 @@ class LauncherOptions:
     translation_profile: str = DEFAULT_PROFILE_NAME
     model_device: str = "cuda:0"
     asr_backend: str = "kotoba"
+    diarize_speakers: bool = True
+    num_speakers: int | None = None
     ollama_host: str = "localhost"
     ollama_port: int = 11434
 
@@ -110,6 +112,10 @@ def build_process_command(options: LauncherOptions) -> list[str]:
         command.extend(["--asr-backend", "faster-kotoba"])
     if options.asr_backend == "qwen3":
         command.extend(["--asr-backend", "qwen3", "--model-dtype", "bfloat16"])
+        if options.diarize_speakers:
+            command.append("--diarize-speakers")
+            if options.num_speakers is not None:
+                command.extend(["--num-speakers", str(options.num_speakers)])
     if options.translate:
         command.append("--translate")
         if options.translation_model.strip():
@@ -176,6 +182,17 @@ def asr_backend_label(value: str) -> str:
     if value == "qwen3":
         return "Qwen3-ASR 1.7B (실험)"
     return "Kotoba-Whisper v2.2"
+
+
+SPEAKER_COUNT_LABELS = ("자동", "2명", "3명", "4명", "5명")
+
+
+def speaker_count_from_label(label: str) -> int | None:
+    return {f"{count}명": count for count in range(2, 6)}.get(label)
+
+
+def speaker_count_label(count: object) -> str:
+    return f"{count}명" if isinstance(count, int) and count in {2, 3, 4, 5} else "자동"
 
 
 def available_asr_backend_labels(available_devices: tuple[str, ...]) -> tuple[str, ...]:
@@ -489,6 +506,8 @@ def launcher_state_from_values(
     asr_backend: str = "kotoba",
     install_root: Path | None = None,
     translation_profile: str = DEFAULT_PROFILE_NAME,
+    diarize_speakers: bool = True,
+    num_speakers: int | None = None,
 ) -> dict:
     root = install_root or standalone_root()
     return {
@@ -500,6 +519,8 @@ def launcher_state_from_values(
         "ollama_port": ollama_port,
         "translation_profile": translation_profile or DEFAULT_PROFILE_NAME,
         "asr_backend": asr_backend if asr_backend in {"kotoba", "faster-kotoba", "qwen3"} else "kotoba",
+        "diarize_speakers": bool(diarize_speakers),
+        "speaker_count": num_speakers if num_speakers in {2, 3, 4, 5} else None,
     }
 
 
@@ -803,8 +824,8 @@ class KotobaLauncher:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("Kotoba Standalone")
-        self.root.geometry("860x620")
-        self.root.minsize(820, 620)
+        self.root.geometry("860x650")
+        self.root.minsize(820, 650)
         self.events: queue.Queue[tuple[str, str | None]] = queue.Queue()
         self.process: subprocess.Popen[str] | None = None
         self.started_at: float | None = None
@@ -840,6 +861,9 @@ class KotobaLauncher:
         self.translation_profile = StringVar(value=saved_profile)
         self.model_device = StringVar(value=initial_model_device)
         self.asr_engine = StringVar(value=asr_backend_label(initial_asr_backend))
+        saved_diarize = state.get("diarize_speakers")
+        self.diarize_speakers = BooleanVar(value=saved_diarize if isinstance(saved_diarize, bool) else True)
+        self.speaker_count_value = StringVar(value=speaker_count_label(state.get("speaker_count")))
         self.external_ffmpeg_path = StringVar(value=str(state.get("external_ffmpeg_path") or ""))
         self.ollama_host = StringVar(value=str(state.get("ollama_host") or "localhost"))
         self.ollama_port = StringVar(value=str(state.get("ollama_port") or "11434"))
@@ -860,9 +884,12 @@ class KotobaLauncher:
         self.output_dir.trace_add("write", lambda *_args: self._refresh_derived_status())
         self.model_device.trace_add("write", lambda *_args: self._remember_state())
         self.asr_engine.trace_add("write", lambda *_args: self._refresh_qwen_status())
+        self.diarize_speakers.trace_add("write", lambda *_args: self._refresh_speaker_controls())
+        self.speaker_count_value.trace_add("write", lambda *_args: self._remember_state())
         self.external_ffmpeg_path.trace_add("write", lambda *_args: self._refresh_ffmpeg_status())
         self.ollama_host.trace_add("write", lambda *_args: self._refresh_ollama_status())
         self.ollama_port.trace_add("write", lambda *_args: self._refresh_ollama_status())
+        self._refresh_speaker_controls()
         self._refresh_derived_status()
         self.root.after(100, self._drain_events)
 
@@ -893,21 +920,35 @@ class KotobaLauncher:
             width=24,
         ).grid(row=2, column=1, sticky="w", padx=8, pady=form_pady)
 
+        ttk.Label(outer, text="화자 분리 (Qwen)").grid(row=3, column=0, sticky="w", pady=form_pady)
+        self.speaker_checkbutton = ttk.Checkbutton(outer, text="사용", variable=self.diarize_speakers)
+        self.speaker_checkbutton.grid(row=3, column=1, sticky="w", padx=8, pady=form_pady)
+        self.speaker_count_label_widget = ttk.Label(outer, text="화자 분리 인원")
+        self.speaker_count_label_widget.grid(row=3, column=2, sticky="e", padx=3, pady=form_pady)
+        self.speaker_count_box = ttk.Combobox(
+            outer,
+            textvariable=self.speaker_count_value,
+            values=SPEAKER_COUNT_LABELS,
+            state="readonly",
+            width=8,
+        )
+        self.speaker_count_box.grid(row=3, column=3, sticky="w", padx=3, pady=form_pady)
+
         self.translation_model_label = ttk.Label(outer, text="번역 모델")
-        self.translation_model_label.grid(row=3, column=0, sticky="w", pady=form_pady)
+        self.translation_model_label.grid(row=4, column=0, sticky="w", pady=form_pady)
         self.translation_model_entry = ttk.Entry(outer, textvariable=self.model)
-        self.translation_model_entry.grid(row=3, column=1, sticky="ew", padx=8, pady=form_pady)
+        self.translation_model_entry.grid(row=4, column=1, sticky="ew", padx=8, pady=form_pady)
         self.ollama_models_button = ttk.Button(outer, text="Ollama 모델", command=self.load_ollama_models)
         self.ollama_models_button.grid(
-            row=3, column=2, sticky="ew", padx=3, pady=form_pady
+            row=4, column=2, sticky="ew", padx=3, pady=form_pady
         )
         self.ollama_check_button = ttk.Button(outer, text="Ollama 확인", command=self.check_ollama)
         self.ollama_check_button.grid(
-            row=3, column=3, sticky="ew", padx=3, pady=form_pady
+            row=4, column=3, sticky="ew", padx=3, pady=form_pady
         )
 
         self.korean_style_label = ttk.Label(outer, text="한국어 말투")
-        self.korean_style_label.grid(row=4, column=0, sticky="w", pady=form_pady)
+        self.korean_style_label.grid(row=5, column=0, sticky="w", pady=form_pady)
         self.korean_style_box = ttk.Combobox(
             outer,
             textvariable=self.korean_style,
@@ -915,10 +956,10 @@ class KotobaLauncher:
             state="readonly",
             width=18,
         )
-        self.korean_style_box.grid(row=4, column=1, sticky="w", padx=8, pady=form_pady)
+        self.korean_style_box.grid(row=5, column=1, sticky="w", padx=8, pady=form_pady)
 
         self.translation_profile_label = ttk.Label(outer, text="번역 추가 설정")
-        self.translation_profile_label.grid(row=6, column=0, sticky="w", pady=form_pady)
+        self.translation_profile_label.grid(row=7, column=0, sticky="w", pady=form_pady)
         self.translation_profile_box = ttk.Combobox(
             outer,
             textvariable=self.translation_profile,
@@ -926,25 +967,25 @@ class KotobaLauncher:
             state="readonly",
             width=18,
         )
-        self.translation_profile_box.grid(row=6, column=1, sticky="w", padx=8, pady=form_pady)
+        self.translation_profile_box.grid(row=7, column=1, sticky="w", padx=8, pady=form_pady)
         self.translation_profile_button = ttk.Button(
             outer,
             text="프로필 관리...",
             command=self.open_translation_profile_dialog,
         )
-        self.translation_profile_button.grid(row=6, column=2, columnspan=2, sticky="ew", padx=3, pady=form_pady)
+        self.translation_profile_button.grid(row=7, column=2, columnspan=2, sticky="ew", padx=3, pady=form_pady)
 
-        ttk.Label(outer, text="처리 장치").grid(row=5, column=0, sticky="w", pady=form_pady)
+        ttk.Label(outer, text="처리 장치").grid(row=6, column=0, sticky="w", pady=form_pady)
         ttk.Combobox(
             outer,
             textvariable=self.model_device,
             values=self.available_model_devices,
             state="readonly",
             width=18,
-        ).grid(row=5, column=1, sticky="w", padx=8, pady=form_pady)
+        ).grid(row=6, column=1, sticky="w", padx=8, pady=form_pady)
 
         buttons = ttk.Frame(outer)
-        buttons.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(10, 8))
+        buttons.grid(row=8, column=0, columnspan=4, sticky="ew", pady=(10, 8))
         buttons.columnconfigure(0, weight=1)
         self.translate_checkbutton = ttk.Checkbutton(buttons, text="한국어 번역까지 실행", variable=self.translate)
         self.translate_checkbutton.grid(row=0, column=1, padx=(0, 12))
@@ -960,7 +1001,7 @@ class KotobaLauncher:
         self.open_input_button.grid(row=0, column=6, padx=4)
 
         progress_panel = ttk.LabelFrame(outer, text="진행", padding=(10, 8))
-        progress_panel.grid(row=8, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        progress_panel.grid(row=9, column=0, columnspan=4, sticky="ew", pady=(4, 0))
         progress_panel.columnconfigure(1, weight=1)
         ttk.Label(progress_panel, text="처리 시간:", style="Panel.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
         ttk.Label(progress_panel, textvariable=self.status, style="Panel.TLabel").grid(row=0, column=1, sticky="w")
@@ -986,7 +1027,7 @@ class KotobaLauncher:
         ttk.Button(log_buttons, text="로그 복사", command=self.copy_log).grid(row=1, column=0, sticky="ew")
 
         status_panel = ttk.LabelFrame(outer, text="상태", padding=(10, 6))
-        status_panel.grid(row=9, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        status_panel.grid(row=10, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         status_panel.columnconfigure(0, weight=1)
         status_panel.columnconfigure(1, weight=0)
 
@@ -1224,6 +1265,8 @@ class KotobaLauncher:
             translation_profile=self.translation_profile.get(),
             model_device=self.model_device.get().strip() or "cuda:0",
             asr_backend=asr_backend,
+            diarize_speakers=self.diarize_speakers.get(),
+            num_speakers=speaker_count_from_label(self.speaker_count_value.get()),
             ollama_host=self.ollama_host.get().strip() or "localhost",
             ollama_port=ollama_port,
         )
@@ -1490,6 +1533,14 @@ class KotobaLauncher:
 
     def _refresh_qwen_status(self) -> None:
         self.qwen_status.set(qwen_environment_status_text())
+        self._refresh_speaker_controls()
+
+    def _refresh_speaker_controls(self, running: bool | None = None) -> None:
+        if running is None:
+            running = self.started_at is not None
+        available = asr_backend_from_label(self.asr_engine.get()) == "qwen3" and not running
+        self.speaker_checkbutton.configure(state="normal" if available else "disabled")
+        self.speaker_count_box.configure(state="readonly" if available and self.diarize_speakers.get() else "disabled")
         self._remember_state()
 
     def _ollama_port_or_warn(self) -> int | None:
@@ -1584,6 +1635,8 @@ class KotobaLauncher:
                 asr_backend_from_label(self.asr_engine.get()),
                 self.app_root,
                 translation_profile=self.translation_profile.get(),
+                diarize_speakers=self.diarize_speakers.get(),
+                num_speakers=speaker_count_from_label(self.speaker_count_value.get()),
             )
         )
 
@@ -1598,12 +1651,14 @@ class KotobaLauncher:
         self.run_button.configure(state="disabled")
         self.translate_button.configure(state="disabled")
         self.translate_checkbutton.configure(state="disabled")
+        self._refresh_speaker_controls(running=True)
         self.stop_button.configure(state="normal")
 
     def _set_idle_buttons(self) -> None:
         self.run_button.configure(state="normal")
         self._refresh_translation_controls()
         self._update_translate_button_state()
+        self._refresh_speaker_controls(running=False)
         self.stop_button.configure(state="disabled")
 
     def _set_ollama_lookup_buttons(self, state: str) -> None:
