@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import kotoba_standalone.translate.ollama as ollama_module
 from kotoba_standalone.translate.ollama import (
     OllamaModelError,
     OllamaUnavailableError,
@@ -223,6 +224,28 @@ def test_get_ollama_models_wakes_local_ollama_before_retry(monkeypatch: pytest.M
 
     assert get_ollama_models(TranslationOptions(model="a:model")) == ["a:model"]
     assert calls == {"urlopen": 2, "wake": 1}
+
+
+def test_get_ollama_models_waits_for_slow_windows_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = {"seconds": 0.0}
+    wake_calls = []
+
+    def read_after_startup(_url: str, _timeout: int) -> dict[str, object]:
+        if clock["seconds"] < 25.0:
+            raise urllib.error.URLError("Ollama is still starting")
+        return {"models": [{"name": "a:model"}]}
+
+    def advance_clock(seconds: float) -> None:
+        clock["seconds"] += seconds
+
+    monkeypatch.setattr(ollama_module, "_read_ollama_tags", read_after_startup)
+    monkeypatch.setattr(ollama_module, "_wake_local_ollama", lambda: wake_calls.append(True))
+    monkeypatch.setattr(ollama_module.time, "monotonic", lambda: clock["seconds"])
+    monkeypatch.setattr(ollama_module.time, "sleep", advance_clock)
+
+    assert get_ollama_models(TranslationOptions(model="a:model")) == ["a:model"]
+    assert wake_calls == [True]
+    assert clock["seconds"] == 25.0
 
 
 def test_get_ollama_models_does_not_wake_remote_ollama(monkeypatch: pytest.MonkeyPatch) -> None:

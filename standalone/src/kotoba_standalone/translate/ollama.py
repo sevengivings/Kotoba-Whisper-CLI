@@ -22,6 +22,7 @@ OLLAMA_OPTIONS = {
     "repeat_penalty": 1.05,
     "num_ctx": 8192,
 }
+OLLAMA_STARTUP_WAIT_SECONDS = 60
 
 RECOMMENDED_TRANSLATION_MODEL_KEYWORDS = (
     "hy-mt2-30b",
@@ -128,14 +129,15 @@ def check_ollama_available(options: TranslationOptions) -> None:
 
 def get_ollama_models(options: TranslationOptions) -> list[str]:
     url = f"http://{options.ollama_host}:{options.ollama_port}/api/tags"
-    timeout = min(5, max(1, options.timeout_seconds))
+    request_timeout = min(5, max(1, options.timeout_seconds))
+    startup_wait_seconds = min(OLLAMA_STARTUP_WAIT_SECONDS, max(5, options.timeout_seconds))
     try:
-        data = _read_ollama_tags(url, timeout)
+        data = _read_ollama_tags(url, request_timeout)
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         if _can_wake_ollama(options.ollama_host, options.ollama_port):
             _wake_local_ollama()
             try:
-                data = _read_ollama_tags_with_retries(url, timeout)
+                data = _read_ollama_tags_with_retries(url, request_timeout, startup_wait_seconds)
             except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as retry_exc:
                 raise OllamaUnavailableError(
                     f"Ollama is not reachable at {url}. "
@@ -162,18 +164,18 @@ def _read_ollama_tags(url: str, timeout: int) -> dict[str, Any]:
     return data
 
 
-def _read_ollama_tags_with_retries(url: str, timeout: int) -> dict[str, Any]:
-    deadline = time.monotonic() + min(20, max(5, timeout))
+def _read_ollama_tags_with_retries(url: str, request_timeout: int, startup_wait_seconds: int) -> dict[str, Any]:
+    deadline = time.monotonic() + startup_wait_seconds
     last_error: Exception | None = None
     while time.monotonic() <= deadline:
         try:
-            return _read_ollama_tags(url, min(2, timeout))
+            return _read_ollama_tags(url, min(2, request_timeout))
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             last_error = exc
             time.sleep(0.5)
     if last_error is not None:
         raise last_error
-    return _read_ollama_tags(url, timeout)
+    return _read_ollama_tags(url, request_timeout)
 
 
 def _can_wake_ollama(host: str, port: int) -> bool:
