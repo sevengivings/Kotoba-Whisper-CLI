@@ -63,6 +63,21 @@ def test_normalize_speech_spans_filters_pads_merges_and_splits() -> None:
     ]
 
 
+def test_normalize_speech_spans_balances_short_tail_after_max_duration_split() -> None:
+    spans = normalize_speech_spans(
+        duration_s=600.0,
+        spans=[SilenceSpan(562.513, 592.524)],
+        min_duration_s=0.25,
+        max_duration_s=30.0,
+    )
+
+    assert len(spans) == 2
+    assert spans[0].start == 562.513
+    assert spans[-1].end == 592.524
+    assert spans[0].end == spans[1].start
+    assert all(0.25 <= span.end - span.start <= 30.0 for span in spans)
+
+
 def test_ffmpeg_exe_prefers_configured_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     configured = tmp_path / "custom-ffmpeg.exe"
     configured.write_text("", encoding="utf-8")

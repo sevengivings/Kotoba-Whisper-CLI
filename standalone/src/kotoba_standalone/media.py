@@ -270,7 +270,7 @@ def normalize_speech_spans(
         for span in spans
         if span.end - span.start >= min_duration_s
     ]
-    return _split_merged_spans(normalized, max_duration_s, merge_gap_s)
+    return _split_merged_spans(normalized, min_duration_s, max_duration_s, merge_gap_s)
 
 
 def _wav_frame_dbfs(wav_path: Path, frame_duration_s: float) -> list[float]:
@@ -326,7 +326,9 @@ def _padded_span(start: float, end: float, duration_s: float, padding_s: float) 
     return SilenceSpan(max(0.0, start - padding_s), min(duration_s, end + padding_s))
 
 
-def _split_merged_spans(spans: list[SilenceSpan], max_duration_s: float, merge_gap_s: float) -> list[SilenceSpan]:
+def _split_merged_spans(
+    spans: list[SilenceSpan], min_duration_s: float, max_duration_s: float, merge_gap_s: float
+) -> list[SilenceSpan]:
     merged: list[SilenceSpan] = []
     for span in spans:
         if not merged:
@@ -344,11 +346,11 @@ def _split_merged_spans(spans: list[SilenceSpan], max_duration_s: float, merge_g
 
     split: list[SilenceSpan] = []
     for span in merged:
-        split.extend(_split_span(span.start, span.end, max_duration_s))
+        split.extend(_split_span(span.start, span.end, min_duration_s, max_duration_s))
     return split
 
 
-def _split_span(start: float, end: float, max_duration_s: float) -> list[SilenceSpan]:
+def _split_span(start: float, end: float, min_duration_s: float, max_duration_s: float) -> list[SilenceSpan]:
     spans: list[SilenceSpan] = []
     cursor = start
     while end - cursor > max_duration_s:
@@ -356,7 +358,12 @@ def _split_span(start: float, end: float, max_duration_s: float) -> list[Silence
         spans.append(SilenceSpan(cursor, next_end))
         cursor = next_end
     if end > cursor:
-        spans.append(SilenceSpan(cursor, end))
+        if spans and end - cursor < min_duration_s:
+            previous = spans.pop()
+            midpoint = (previous.start + end) / 2
+            spans.extend((SilenceSpan(previous.start, midpoint), SilenceSpan(midpoint, end)))
+        else:
+            spans.append(SilenceSpan(cursor, end))
     return spans
 
 
