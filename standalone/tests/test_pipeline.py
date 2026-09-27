@@ -171,6 +171,7 @@ def test_process_video_splits_subtitles_at_speaker_turns(
     assert "hello\n\n2\n" in srt
     assert "there" in srt
     report = json.loads((tmp_path / "out" / "ja_short_test.speakers.json").read_text(encoding="utf-8"))
+    assert report["applied_to_subtitles"] is True
     assert [item["speaker"] for item in report["subtitles"]] == ["SPEAKER_00", "SPEAKER_01"]
 
 
@@ -385,7 +386,7 @@ def test_process_video_offsets_vad_segment_timestamps(tmp_path: Path, monkeypatc
     assert process_meta["transcription_segment_count"] == 2
 
 
-def test_speaker_diarization_rejects_mixed_word_and_segment_timestamps(
+def test_speaker_diarization_falls_back_when_segment_lacks_word_timestamps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class FakeTranscriber:
@@ -403,8 +404,21 @@ def test_speaker_diarization_rejects_mixed_word_and_segment_timestamps(
             result.word_timestamps_used = self.calls == 1
             return result
 
-    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    media = tmp_path / "media" / "ja_short_test.mp4"
+    media.parent.mkdir()
+    shutil.copy2(Path(__file__).parents[2] / "sample" / "ja_short_test.mp4", media)
+
+    class FakeTranslation:
+        output_srt = tmp_path / "out" / "ja_short_test.ko.srt"
+
+    def fake_translate_srt(*args: object, **kwargs: object) -> FakeTranslation:
+        FakeTranslation.output_srt.write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\ntranslation\n", encoding="utf-8"
+        )
+        return FakeTranslation()
+
     monkeypatch.setattr(pipeline, "KotobaTranscriber", FakeTranscriber)
+    monkeypatch.setattr(pipeline, "translate_srt", fake_translate_srt)
     monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [SilenceSpan(1.0, 2.0)])
     monkeypatch.setattr(
         pipeline,
@@ -424,12 +438,23 @@ def test_speaker_diarization_rejects_mixed_word_and_segment_timestamps(
 
     result = process_video(
         media,
-        ProcessOptions(output_dir=tmp_path / "out", vad_engine="ffmpeg", diarize_speakers=True),
+        ProcessOptions(output_dir=tmp_path / "out", vad_engine="ffmpeg", diarize_speakers=True, translate=True),
     )
 
-    assert result.status == "alignment_error"
-    assert result.ja_srt_path is None
-    assert "require word timestamps" in result.message
+    assert result.status == "success"
+    assert result.ja_srt_path is not None and result.ja_srt_path.exists()
+    source_subtitles = result.ja_srt_path.read_text(encoding="utf-8")
+    assert "word 1" in source_subtitles and "word 2" in source_subtitles
+    assert result.ko_srt_path == FakeTranslation.output_srt
+    assert result.copied_ko_srt_path == media.with_suffix(".srt")
+    assert "speaker-aware subtitle grouping skipped" in result.message
+    process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
+    assert process_meta["missing_word_timestamp_segment_count"] == 1
+    assert process_meta["missing_word_timestamp_segments"] == [2]
+    assert process_meta["speaker_grouping_applied"] is False
+    report = json.loads((tmp_path / "out" / "ja_short_test.speakers.json").read_text(encoding="utf-8"))
+    assert report["applied_to_subtitles"] is False
+    assert all(item["speaker"] is None for item in report["subtitles"])
 
 
 def test_process_video_uses_pyannote_speech_spans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

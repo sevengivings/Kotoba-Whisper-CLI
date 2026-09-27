@@ -228,6 +228,7 @@ def process_video(
     segment_count = 1
     transcription = None
     word_timestamps_used = False
+    missing_word_timestamp_segments: list[int] = []
     if pyannote_no_speech:
         raw_chunks = []
         raw_output = {"chunks": []}
@@ -247,6 +248,8 @@ def process_video(
                 segment_chunks = extract_raw_chunks(transcription.raw)
                 if segment_chunks:
                     word_timestamps_used &= transcription.word_timestamps_used
+                    if not transcription.word_timestamps_used:
+                        missing_word_timestamp_segments.append(index)
                     raw_chunks.extend(offset_raw_chunks(segment_chunks, span.start))
             finally:
                 segment_path.unlink(missing_ok=True)
@@ -257,6 +260,8 @@ def process_video(
         transcription = transcriber.transcribe(str(wav_path))
         word_timestamps_used = transcription.word_timestamps_used
         raw_chunks = extract_raw_chunks(transcription.raw)
+        if raw_chunks and not word_timestamps_used:
+            missing_word_timestamp_segments = [1]
         raw_output = transcription.raw
 
     if transcription is None and not pyannote_no_speech:
@@ -265,23 +270,15 @@ def process_video(
         transcription = transcriber.transcribe(str(wav_path))
         word_timestamps_used = transcription.word_timestamps_used
         raw_chunks = extract_raw_chunks(transcription.raw)
+        if raw_chunks and not word_timestamps_used:
+            missing_word_timestamp_segments = [1]
         raw_output = transcription.raw
     _emit(progress, started, "postprocess", "Writing Japanese subtitles", 8, progress_total)
-    if speaker_diarization is not None and raw_chunks and not word_timestamps_used:
-        return ProcessResult(
-            input_path=input_path,
-            output_dir=output_dir,
-            wav_path=wav_path,
-            ja_srt_path=None,
-            ko_srt_path=None,
-            copied_ko_srt_path=None,
-            status="alignment_error",
-            message="Speaker-aware subtitles require word timestamps from the ASR backend.",
-        )
+    speaker_grouping_applied = speaker_diarization is not None and word_timestamps_used
     normalized_chunks = normalize_chunks(raw_chunks, deduplicate=not word_timestamps_used)
     chunks = (
         group_chunks_by_speaker(normalized_chunks, speaker_diarization.turns)
-        if speaker_diarization is not None
+        if speaker_grouping_applied
         else group_chunks_by_timing(normalized_chunks)
     )
     quality_issues = []
@@ -346,13 +343,15 @@ def process_video(
                     "embedding": speaker_diarization.embedding,
                     "requested_speaker_count": options.num_speakers,
                     "detected_speaker_count": speaker_diarization.speaker_count,
+                    "applied_to_subtitles": speaker_grouping_applied,
                     "turns": turns_to_json(speaker_diarization.turns),
                     "subtitles": [
                         {
                             "index": index,
                             "start": round(chunk.start, 3),
                             "end": round(chunk.end, 3),
-                            "speaker": speaker_for_chunk(chunk, speaker_diarization.turns),
+                            "speaker": speaker_for_chunk(chunk, speaker_diarization.turns)
+                            if speaker_grouping_applied else None,
                         }
                         for index, chunk in enumerate(chunks, 1)
                     ],
@@ -408,6 +407,8 @@ def process_video(
                 "torch_cuda_version": transcription.torch_cuda_version if transcription is not None else None,
                 "batch_size_used": transcription.batch_size_used if transcription is not None else None,
                 "word_timestamps_used": word_timestamps_used,
+                "missing_word_timestamp_segment_count": len(missing_word_timestamp_segments),
+                "missing_word_timestamp_segments": missing_word_timestamp_segments,
                 "asr_backend": options.asr_backend,
                 "asr_model": _asr_model_name(options),
                 "qwen_aligner_model": options.qwen_aligner_model if options.asr_backend == "qwen3" else None,
@@ -444,6 +445,7 @@ def process_video(
                 "vad_pre_split": options.vad_pre_split,
                 "transcription_segment_count": segment_count,
                 "speaker_diarization_report": str(speaker_json_path) if speaker_diarization is not None else None,
+                "speaker_grouping_applied": speaker_grouping_applied,
                 "speaker_count": speaker_diarization.speaker_count if speaker_diarization is not None else None,
                 "subtitle_count": len(chunks),
                 "alignment_engine": options.alignment_engine,
@@ -494,6 +496,11 @@ def process_video(
         message = f"{message}; WhisperX aligned Japanese subtitle: {ja_aligned_srt_path}"
     if speaker_diarization is not None:
         message = f"{message}; speaker turns: {speaker_json_path}"
+        if raw_chunks and not speaker_grouping_applied:
+            message = (
+                f"{message}; speaker-aware subtitle grouping skipped because "
+                f"{len(missing_word_timestamp_segments)} transcribed segment(s) lacked word timestamps"
+            )
     _emit(progress, started, "done", "Standalone transcription completed", progress_total, progress_total)
     return ProcessResult(
         input_path=input_path,
