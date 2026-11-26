@@ -34,10 +34,14 @@ uv run --no-sync kotoba process "D:\Videos\sample.mp4"
 
 ## 한국어 번역
 
-Ollama를 설치한 뒤 권장 모델 중 하나를 받습니다.
+Ollama를 설치한 뒤 GPU VRAM에 맞는 권장 `Hy-MT3` 모델을 받습니다(기존 `Hy-MT2` 모델도 계속 지원합니다).
 
 ```powershell
-ollama pull hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
+# 24GB급 GPU (품질·속도 우선, MoE 활성 3B)
+ollama pull hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M
+
+# 8~16GB급 GPU
+ollama pull hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M
 ```
 
 자막 추출과 번역을 함께 실행하려면:
@@ -45,6 +49,8 @@ ollama pull hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
 ```powershell
 uv run --no-sync kotoba process "D:\Videos\sample.mp4" --translate --translation-model-choice
 ```
+
+`standalone`은 전사(ASR) 및 정렬 직후 GPU(PyTorch/CUDA) 메모리를 자동 해제한 뒤 Ollama 번역을 호출하므로, 원스톱 실행에서도 24GB급 GPU에서 `30B-A3B` 같은 대형 번역 모델을 안정적으로 사용할 수 있습니다. 또한 `Hy-MT3` 모델 사용 시에는 유저 프롬프트에 한국어 문체 지시(`polite` / `banmal` / `strict-banmal`)를 함께 전달해 존댓말·반말 설정이 정상 반영됩니다.
 
 번역이 성공하면 한국어 자막은 작업 폴더뿐 아니라 원본 영상 옆에도 복사됩니다.
 
@@ -76,7 +82,7 @@ Docker 버전의 코드, 실행 스크립트, 설정, 데이터 폴더는 모두
 | Qwen3-ASR 0.6B/1.7B | Apple Silicon MLX 전사 선택지 | `Qwen/Qwen3-ASR-0.6B`, `Qwen/Qwen3-ASR-1.7B` |
 | MLX / mlx-whisper / mlx-qwen3-asr | Apple Silicon GPU 가속 | Apple MLX 커뮤니티와 관련 기여자 |
 | faster-whisper / CTranslate2 | CPU 전사 경로 | faster-whisper, CTranslate2 |
-| Ollama / Hy-MT2 GGUF | 선택적 일본어 -> 한국어 번역 | Ollama와 Hugging Face GGUF 모델 배포자 |
+| Ollama / Hy-MT3 & Hy-MT2 GGUF | 선택적 일본어 -> 한국어 번역 | Ollama와 Hugging Face GGUF 모델 배포자 |
 
 모델과 주요 라이브러리의 라이선스 및 재배포 고지는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요.
 

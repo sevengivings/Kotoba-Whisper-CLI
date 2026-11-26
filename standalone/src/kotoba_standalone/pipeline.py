@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import re
-import time
+import gc
 import json
+import re
 import shutil
+import sys
+import time
 from typing import Any
 from pathlib import Path
 
@@ -203,104 +205,108 @@ def process_video(
         _emit(progress, started, "load_model", f"Loading {options.asr_backend} ASR model", 6, progress_total)
 
     transcriber = None
-    if not pyannote_no_speech:
-        transcriber = create_transcriber(options)
-        try:
-            transcriber.load()
-        except TranscriptionDependencyError as exc:
-            message = (
-                f"Standalone extracted audio to {wav_path}. "
-                f"Audio duration: {audio_duration:.3f} seconds. "
-                f"{exc}"
-            )
-            _emit(progress, started, "dependency", "Transcription dependency required", 1, 1)
-            return ProcessResult(
-                input_path=input_path,
-                output_dir=output_dir,
-                wav_path=wav_path,
-                ja_srt_path=None,
-                ko_srt_path=None,
-                copied_ko_srt_path=None,
-                status="missing_transcription_dependency",
-                message=message,
-            )
-
     segment_count = 1
     transcription = None
     word_timestamps_used = False
     missing_word_timestamp_segments: list[int] = []
-    if pyannote_no_speech:
-        raw_chunks = []
-        raw_output = {"chunks": []}
-        segment_count = 0
-    elif spans:
-        assert transcriber is not None
-        _emit(progress, started, "transcribe", "Transcribing VAD segments", 7, progress_total)
-        raw_chunks = []
-        word_timestamps_used = True
-        segment_count = len(spans)
-        for index, span in enumerate(spans, 1):
-            _emit(progress, started, "transcribe_segments", f"Transcribing VAD segment {index}/{len(spans)}", index, len(spans))
-            segment_path = output_dir / f"{input_path.stem}.segment.{index:04d}.wav"
+    try:
+        if not pyannote_no_speech:
+            transcriber = create_transcriber(options)
             try:
-                extract_audio_segment(wav_path, segment_path, span.start, span.end)
-                transcription = transcriber.transcribe(str(segment_path))
-                segment_chunks = extract_raw_chunks(transcription.raw)
-                if segment_chunks:
-                    word_timestamps_used &= transcription.word_timestamps_used
-                    if not transcription.word_timestamps_used:
-                        missing_word_timestamp_segments.append(index)
-                    raw_chunks.extend(offset_raw_chunks(segment_chunks, span.start))
-            finally:
-                segment_path.unlink(missing_ok=True)
-        raw_output = {"chunks": raw_chunks}
-    else:
-        assert transcriber is not None
-        _emit(progress, started, "transcribe", "Transcribing audio", 7, progress_total)
-        transcription = transcriber.transcribe(str(wav_path))
-        word_timestamps_used = transcription.word_timestamps_used
-        raw_chunks = extract_raw_chunks(transcription.raw)
-        if raw_chunks and not word_timestamps_used:
-            missing_word_timestamp_segments = [1]
-        raw_output = transcription.raw
+                transcriber.load()
+            except TranscriptionDependencyError as exc:
+                message = (
+                    f"Standalone extracted audio to {wav_path}. "
+                    f"Audio duration: {audio_duration:.3f} seconds. "
+                    f"{exc}"
+                )
+                _emit(progress, started, "dependency", "Transcription dependency required", 1, 1)
+                return ProcessResult(
+                    input_path=input_path,
+                    output_dir=output_dir,
+                    wav_path=wav_path,
+                    ja_srt_path=None,
+                    ko_srt_path=None,
+                    copied_ko_srt_path=None,
+                    status="missing_transcription_dependency",
+                    message=message,
+                )
 
-    if transcription is None and not pyannote_no_speech:
-        assert transcriber is not None
-        _emit(progress, started, "transcribe", "Transcribing audio", 7, progress_total)
-        transcription = transcriber.transcribe(str(wav_path))
-        word_timestamps_used = transcription.word_timestamps_used
-        raw_chunks = extract_raw_chunks(transcription.raw)
-        if raw_chunks and not word_timestamps_used:
-            missing_word_timestamp_segments = [1]
-        raw_output = transcription.raw
-    _emit(progress, started, "postprocess", "Writing Japanese subtitles", 8, progress_total)
-    speaker_grouping_applied = speaker_diarization is not None and word_timestamps_used
-    normalized_chunks = normalize_chunks(raw_chunks, deduplicate=not word_timestamps_used)
-    chunks = (
-        group_chunks_by_speaker(normalized_chunks, speaker_diarization.turns)
-        if speaker_grouping_applied
-        else group_chunks_by_timing(normalized_chunks)
-    )
-    quality_issues = []
-    if options.report_subtitle_quality or options.drop_likely_hallucinations:
-        quality_issues = analyze_subtitle_quality(chunks, wav_path)
-    dropped_quality_issues = []
-    if options.drop_likely_hallucinations:
-        chunks, dropped_quality_issues = filter_likely_hallucinations(chunks)
-    tail_refine_quality_issues = []
-    tail_refine_attempts: list[dict[str, Any]] = []
-    if options.tail_retranscribe_long_subtitles and chunks:
-        assert transcriber is not None
-        tail_source_issues = analyze_subtitle_quality(chunks, wav_path)
-        chunks, tail_refine_quality_issues, tail_refine_attempts = tail_retranscribe_long_subtitles(
-            chunks,
-            tail_source_issues,
-            wav_path,
-            output_dir,
-            input_path.stem,
-            transcriber,
-            max_candidates=options.tail_retranscribe_max_candidates,
+        if pyannote_no_speech:
+            raw_chunks = []
+            raw_output = {"chunks": []}
+            segment_count = 0
+        elif spans:
+            assert transcriber is not None
+            _emit(progress, started, "transcribe", "Transcribing VAD segments", 7, progress_total)
+            raw_chunks = []
+            word_timestamps_used = True
+            segment_count = len(spans)
+            for index, span in enumerate(spans, 1):
+                _emit(progress, started, "transcribe_segments", f"Transcribing VAD segment {index}/{len(spans)}", index, len(spans))
+                segment_path = output_dir / f"{input_path.stem}.segment.{index:04d}.wav"
+                try:
+                    extract_audio_segment(wav_path, segment_path, span.start, span.end)
+                    transcription = transcriber.transcribe(str(segment_path))
+                    segment_chunks = extract_raw_chunks(transcription.raw)
+                    if segment_chunks:
+                        word_timestamps_used &= transcription.word_timestamps_used
+                        if not transcription.word_timestamps_used:
+                            missing_word_timestamp_segments.append(index)
+                        raw_chunks.extend(offset_raw_chunks(segment_chunks, span.start))
+                finally:
+                    segment_path.unlink(missing_ok=True)
+            raw_output = {"chunks": raw_chunks}
+        else:
+            assert transcriber is not None
+            _emit(progress, started, "transcribe", "Transcribing audio", 7, progress_total)
+            transcription = transcriber.transcribe(str(wav_path))
+            word_timestamps_used = transcription.word_timestamps_used
+            raw_chunks = extract_raw_chunks(transcription.raw)
+            if raw_chunks and not word_timestamps_used:
+                missing_word_timestamp_segments = [1]
+            raw_output = transcription.raw
+
+        if transcription is None and not pyannote_no_speech:
+            assert transcriber is not None
+            _emit(progress, started, "transcribe", "Transcribing audio", 7, progress_total)
+            transcription = transcriber.transcribe(str(wav_path))
+            word_timestamps_used = transcription.word_timestamps_used
+            raw_chunks = extract_raw_chunks(transcription.raw)
+            if raw_chunks and not word_timestamps_used:
+                missing_word_timestamp_segments = [1]
+            raw_output = transcription.raw
+        _emit(progress, started, "postprocess", "Writing Japanese subtitles", 8, progress_total)
+        speaker_grouping_applied = speaker_diarization is not None and word_timestamps_used
+        normalized_chunks = normalize_chunks(raw_chunks, deduplicate=not word_timestamps_used)
+        chunks = (
+            group_chunks_by_speaker(normalized_chunks, speaker_diarization.turns)
+            if speaker_grouping_applied
+            else group_chunks_by_timing(normalized_chunks)
         )
+        quality_issues = []
+        if options.report_subtitle_quality or options.drop_likely_hallucinations:
+            quality_issues = analyze_subtitle_quality(chunks, wav_path)
+        dropped_quality_issues = []
+        if options.drop_likely_hallucinations:
+            chunks, dropped_quality_issues = filter_likely_hallucinations(chunks)
+        tail_refine_quality_issues = []
+        tail_refine_attempts: list[dict[str, Any]] = []
+        if options.tail_retranscribe_long_subtitles and chunks:
+            assert transcriber is not None
+            tail_source_issues = analyze_subtitle_quality(chunks, wav_path)
+            chunks, tail_refine_quality_issues, tail_refine_attempts = tail_retranscribe_long_subtitles(
+                chunks,
+                tail_source_issues,
+                wav_path,
+                output_dir,
+                input_path.stem,
+                transcriber,
+                max_candidates=options.tail_retranscribe_max_candidates,
+            )
+    finally:
+        release_gpu_memory(transcriber)
+        transcriber = None
     split_quality_issues = []
     if options.split_long_subtitles:
         split_source_issues = analyze_subtitle_quality(chunks, wav_path)
@@ -477,6 +483,7 @@ def process_video(
     ko_srt_path = None
     copied_ko_srt_path = None
     if options.translate:
+        release_gpu_memory()
         _emit(progress, started, "translate_prepare", "Preparing Korean translation", 1, 2)
         translation = translate_srt(
             ja_srt_path,
@@ -513,6 +520,22 @@ def process_video(
         message=message,
         ja_aligned_srt_path=ja_aligned_srt_path,
     )
+
+
+def release_gpu_memory(transcriber: Any | None = None) -> None:
+    if transcriber is not None:
+        unload = getattr(transcriber, "unload", None)
+        if callable(unload):
+            unload()
+    gc.collect()
+    torch = sys.modules.get("torch")
+    if torch is not None:
+        cuda = getattr(torch, "cuda", None)
+        if cuda is not None and cuda.is_available():
+            cuda.empty_cache()
+            ipc_collect = getattr(cuda, "ipc_collect", None)
+            if callable(ipc_collect):
+                ipc_collect()
 
 
 def translated_srt_path(input_srt: Path) -> Path:

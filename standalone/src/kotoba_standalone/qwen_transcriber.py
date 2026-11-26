@@ -82,6 +82,10 @@ class Qwen3Transcriber:
             word_timestamps_used=bool(qwen_timestamps_to_chunks(time_stamps)),
         )
 
+    def unload(self) -> None:
+        self._model = None
+        self._torch = None
+
 
 def configure_qwen_logging() -> None:
     try:

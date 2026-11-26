@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import gc
 import json
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,7 @@ def align_chunks_with_whisperx(
             "WhisperX is not installed. Install the optional alignment dependency, then retry with --whisperx-align."
         ) from exc
 
+    align_model = None
     try:
         audio = _load_audio(wav_path, sample_rate=int(getattr(getattr(whisperx, "audio", None), "SAMPLE_RATE", 16000)))
         if model_name:
@@ -64,6 +67,17 @@ def align_chunks_with_whisperx(
         )
     except Exception as exc:
         raise WhisperXAlignmentError(f"WhisperX alignment failed: {exc}") from exc
+    finally:
+        align_model = None
+        gc.collect()
+        torch = sys.modules.get("torch")
+        if torch is not None:
+            cuda = getattr(torch, "cuda", None)
+            if cuda is not None and cuda.is_available():
+                cuda.empty_cache()
+                ipc_collect = getattr(cuda, "ipc_collect", None)
+                if callable(ipc_collect):
+                    ipc_collect()
 
     aligned_segments = result.get("segments", []) if isinstance(result, dict) else []
     aligned_chunks = [

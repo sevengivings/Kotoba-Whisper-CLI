@@ -203,29 +203,32 @@ The original `*.ja.srt` is preserved. The aligned output is written as `*.whispe
 
 ## Translation
 
-Recommended Hy-MT2 Ollama models:
+Recommended Hy-MT3 Ollama models (existing Hy-MT2 30B/7B models remain supported):
 
 | Use case | Model | Ollama size | Practical VRAM starting point |
 | --- | --- | ---: | --- |
-| Best quality | `hf.co/mradermacher/Hy-MT2-30B-A3B-GGUF:Q4_K_M` | 18GB | 24GB class GPU recommended |
-| Minimum recommended | `hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M` | 4.6GB | 8GB class GPU minimum; 12GB+ is safer |
+| Best quality & speed (24GB class) | `hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M` | 18GB | 24GB class GPU recommended (3B active MoE) |
+| Balanced / minimum recommended | `hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M` | 4.6GB | 8GB class minimum; 12-16GB recommended |
 
-Pull the best-quality model:
+- **Automatic GPU VRAM release before translation**: After ASR and optional WhisperX alignment finish, `standalone` unloads those models and clears PyTorch/CUDA cache before invoking Ollama. In one-shot `run-gui.bat` or `kotoba process --translate` runs on 24GB GPUs (such as an RTX 3090), this allows larger models like `Hy-MT3-30B-A3B` to fit 100% on GPU without CPU offloading.
+- **Hy-MT3 speech-style prompt handling**: Because `Hy-MT3` tends to ignore `polite` / `banmal` style instructions placed only in the `system` prompt (often defaulting to casual Korean), `standalone` automatically mirrors the selected Korean speech-style instruction (`polite`, `banmal`, or `strict-banmal`) into the `user` prompt whenever an `hy-mt3` model is used.
+
+Pull the 24GB-class model:
 
 ```powershell
-ollama pull hf.co/mradermacher/Hy-MT2-30B-A3B-GGUF:Q4_K_M
+ollama pull hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M
 ```
 
-Pull the minimum recommended model:
+Pull the 8-16GB-class model:
 
 ```powershell
-ollama pull hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
+ollama pull hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M
 ```
 
 Translate an existing Japanese SRT:
 
 ```powershell
-uv run kotoba translate ".\tmp-output\sample.ja.srt" --model hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
+uv run kotoba translate ".\tmp-output\sample.ja.srt" --model hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M
 ```
 
 `--output` may be either an SRT file path or an output folder. When it is a folder, the translated `*.ko.srt` file is written there using the source subtitle name.
@@ -272,7 +275,7 @@ Before translating a long SRT:
 python .\tools\compare-ollama-models.py --timeout-seconds 30
 ```
 
-On the current test machine, 30B Q4 produced the best Korean, and 7B Q4 was a usable faster middle-spec fallback. The 1.8B Q4 model is intentionally not recommended for this subtitle prompt.
+On the current 24GB test machine (with pre-translation VRAM release enabled), Hy-MT3 30B-A3B Q4 delivered both the best Korean quality and the fastest throughput thanks to its 3B-active MoE design, while 7B Q4 remains the right fit for 8-16GB GPUs. The 1.8B Q4 models are intentionally not recommended for this subtitle prompt.
 
 ## Tests
 

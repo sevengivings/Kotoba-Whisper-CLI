@@ -78,6 +78,9 @@ class FasterKotobaTranscriber:
             word_timestamps_used=False,
         )
 
+    def unload(self) -> None:
+        self._model = None
+
 
 def _install_pyav_stub() -> None:
     if "av" in sys.modules:

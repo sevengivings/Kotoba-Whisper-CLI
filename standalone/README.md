@@ -299,33 +299,36 @@ ollama list
 
 ## 번역 모델 선택
 
-추천 모델은 두 가지입니다.
+추천 모델은 두 가지입니다(기존 `Hy-MT2` 30B/7B 모델도 계속 사용할 수 있습니다).
 
 | 용도 | 모델 | Ollama 크기 | VRAM 시작점 |
 | --- | --- | ---: | --- |
-| 품질 우선 | `hf.co/mradermacher/Hy-MT2-30B-A3B-GGUF:Q4_K_M` | 18GB | 24GB급 GPU 권장 |
-| 최소 권장 | `hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M` | 4.6GB | 8GB급 최소, 12GB 이상 권장 |
+| 품질·속도 우선 (24GB급) | `hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M` | 18GB | 24GB급 GPU 권장 (MoE 활성 3B) |
+| 균형·최소 권장 (8~16GB급) | `hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M` | 4.6GB | 8GB급 최소, 12~16GB 권장 |
 
 Ollama 크기는 다운로드되는 모델 파일 크기입니다. 실제 VRAM 사용량은 context, KV cache, GPU offload, 동시에 실행 중인 프로그램에 따라 달라집니다.
 
-24GB급 GPU가 있다면 품질 우선 모델을 받습니다.
+- **ASR 완료 후 GPU 메모리 자동 해제**: `standalone`은 전사(ASR) 및 WhisperX 정렬이 끝난 직후 Ollama 번역을 호출하기 전에 PyTorch/CUDA GPU 메모리를 자동으로 해제합니다. 덕분에 `run-gui.bat`이나 `kotoba process --translate` 같은 원스톱 실행에서도 24GB급 GPU(예: RTX 3090)에서 `Hy-MT3-30B-A3B` 같은 대형 번역 모델을 CPU 오프로딩 없이 100% GPU에 올려 빠르게 실행할 수 있습니다.
+- **Hy-MT3 문체(존댓말/반말) 보정**: `Hy-MT3` 계열 모델은 `system` 프롬프트에 넣은 문체 지시만으로는 존댓말(`polite`) 설정에서도 반말로 출력되는 경향이 있습니다. `standalone`은 모델 이름에 `hy-mt3`가 포함된 경우 `user` 프롬프트에도 한국어 문체 지시(`polite` / `banmal` / `strict-banmal`)를 함께 전달해 의도한 말투를 유지하도록 자동 보정합니다.
+
+24GB급 GPU가 있다면 품질과 속도가 모두 뛰어난 30B-A3B 모델을 받습니다.
 
 ```powershell
-ollama pull hf.co/mradermacher/Hy-MT2-30B-A3B-GGUF:Q4_K_M
+ollama pull hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M
 ```
 
-8GB 또는 12GB급 GPU라면 7B 모델부터 시도하세요.
+8GB~16GB급 GPU라면 7B 모델부터 시도하세요.
 
 ```powershell
-ollama pull hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
+ollama pull hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M
 ```
 
-`Hy-MT2-1.8B-GGUF:Q4_K_M`은 테스트에서 한국어 출력이 깨져서 현재 추천하지 않습니다.
+`Hy-MT3-1.8B` 및 `Hy-MT2-1.8B` 계열은 자막 번역 품질이 떨어지거나 출력이 깨질 수 있어 추천하지 않습니다.
 
 ## 이미 만든 일본어 자막 번역
 
 ```powershell
-uv run kotoba translate ".\tmp-output\sample.ja.srt" --model hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
+uv run kotoba translate ".\tmp-output\sample.ja.srt" --model hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M
 ```
 
 `--output`에는 SRT 파일 경로 또는 결과 폴더를 지정할 수 있습니다. 폴더를 지정하면 원본 이름을 기준으로 `*.ko.srt` 파일을 그 안에 만듭니다.
@@ -388,9 +391,9 @@ python .\tools\compare-ollama-models.py --timeout-seconds 30
 
 현재 테스트 결과는 다음과 같습니다.
 
-- 30B Q4: 한국어 품질이 가장 좋음
-- 7B Q4: 중간 사양용으로 사용 가능
-- 1.8B Q4: 출력이 깨져서 비추천
+- Hy-MT3 30B-A3B Q4: 24GB급 GPU(ASR VRAM 해제 적용)에서 한국어 품질이 가장 좋고, 활성 파라미터가 3B인 MoE 구조라 속도도 가장 빠름
+- Hy-MT3 7B Q4: 8~16GB급 중간 사양용으로 적합
+- 1.8B Q4: 품질 저하/출력 깨짐으로 비추천
 
 ## 문제가 생겼을 때
 
@@ -433,8 +436,8 @@ REM set KOTOBA_FFMPEG_PATH=C:\Python\Faster-Whisper-XXL\ffmpeg.exe
 30B 모델 대신 7B 모델을 사용하세요.
 
 ```powershell
-ollama pull hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
-uv run kotoba translate ".\tmp-output\sample.ja.srt" --model hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
+ollama pull hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M
+uv run kotoba translate ".\tmp-output\sample.ja.srt" --model hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M
 ```
 
 ## 테스트 실행

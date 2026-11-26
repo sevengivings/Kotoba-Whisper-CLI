@@ -583,3 +583,87 @@ def test_tail_retranscribe_rejects_too_short_tail_text(tmp_path: Path, monkeypat
     assert refined == [chunk]
     assert applied == []
     assert attempts[0]["accepted"] is False
+
+
+def test_process_video_unloads_transcriber_and_releases_vram_before_translation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class FakeTranscriber:
+        def __init__(self, options: ProcessOptions) -> None:
+            self.options = options
+
+        def load(self) -> None:
+            events.append("load")
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            del wav_path
+            events.append("transcribe")
+            return FakeResult()
+
+        def unload(self) -> None:
+            events.append("unload")
+
+    class FakeTranslation:
+        output_srt = tmp_path / "out" / "ja_short_test.ko.srt"
+
+    def fake_release_gpu_memory(transcriber: object | None = None) -> None:
+        if transcriber is not None:
+            transcriber.unload()  # type: ignore[attr-defined]
+        events.append("release_gpu_memory")
+
+    def fake_translate_srt(*args: object, **kwargs: object) -> FakeTranslation:
+        del args, kwargs
+        events.append("translate")
+        FakeTranslation.output_srt.write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nannyeonghaseyo\n",
+            encoding="utf-8",
+        )
+        return FakeTranslation()
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, "KotobaTranscriber", FakeTranscriber)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
+    monkeypatch.setattr(pipeline, "release_gpu_memory", fake_release_gpu_memory)
+    monkeypatch.setattr(pipeline, "translate_srt", fake_translate_srt)
+
+    result = process_video(
+        media,
+        ProcessOptions(output_dir=tmp_path / "out", vad_engine="ffmpeg", translate=True),
+    )
+
+    assert result.status == "success"
+    assert events == [
+        "load",
+        "transcribe",
+        "unload",
+        "release_gpu_memory",
+        "release_gpu_memory",
+        "translate",
+    ]
+
+
+def test_release_gpu_memory_calls_unload_gc_and_cuda_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import types
+
+    calls: list[str] = []
+
+    class FakeTranscriber:
+        def unload(self) -> None:
+            calls.append("unload")
+
+    fake_cuda = types.SimpleNamespace(
+        is_available=lambda: True,
+        empty_cache=lambda: calls.append("empty_cache"),
+        ipc_collect=lambda: calls.append("ipc_collect"),
+    )
+    fake_torch = types.SimpleNamespace(cuda=fake_cuda)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(pipeline.gc, "collect", lambda: calls.append("gc") or 0)
+
+    pipeline.release_gpu_memory(FakeTranscriber())
+
+    assert calls == ["unload", "gc", "empty_cache", "ipc_collect"]

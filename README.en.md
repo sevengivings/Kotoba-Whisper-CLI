@@ -30,6 +30,20 @@ Speech detection uses the bundled pyannote VAD by default. The MIT-licensed mode
 
 The upstream license, model card, revision, and checksums are preserved in the [standalone model directory](standalone/src/kotoba_standalone/models/pyannote-segmentation-3.0) and [Docker model directory](docker/app/models/pyannote-segmentation-3.0).
 
+## Korean Translation
+
+Install [Ollama](https://ollama.com/download) and pull a recommended `Hy-MT3` model for your GPU VRAM (existing `Hy-MT2` models remain supported):
+
+```powershell
+# 24GB-class GPU (best quality & speed, 3B active MoE)
+ollama pull hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M
+
+# 8-16GB-class GPU
+ollama pull hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M
+```
+
+`standalone` automatically releases PyTorch/CUDA GPU memory after ASR and alignment before starting Ollama translation, so one-shot runs on 24GB GPUs can fit larger models such as `30B-A3B` cleanly on GPU. When using `Hy-MT3` models, it also mirrors Korean speech-style instructions (`polite`, `banmal`, `strict-banmal`) into the `user` prompt so honorific/casual settings are honored.
+
 ## Editions
 
 | Edition | Recommended for | Description |
@@ -58,6 +72,6 @@ This project stands on several public models and open-source tools. Many thanks 
 | Qwen3-ASR 0.6B/1.7B | Optional Apple Silicon MLX transcription | `Qwen/Qwen3-ASR-0.6B`, `Qwen/Qwen3-ASR-1.7B` |
 | MLX / mlx-whisper / mlx-qwen3-asr | Apple Silicon GPU acceleration | Apple MLX community and contributors |
 | faster-whisper / CTranslate2 | CPU transcription path | faster-whisper, CTranslate2 |
-| Ollama / Hy-MT2 GGUF | Optional Japanese -> Korean translation | Ollama and Hugging Face GGUF model publishers |
+| Ollama / Hy-MT3 & Hy-MT2 GGUF | Optional Japanese -> Korean translation | Ollama and Hugging Face GGUF model publishers |
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for model and dependency licensing and redistribution notes.

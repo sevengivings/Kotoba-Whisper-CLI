@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import urllib.error
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from kotoba_standalone.translate.ollama import (
     OllamaUnavailableError,
     assert_ollama_model_available,
     build_system_prompt,
+    build_user_prompt,
     check_ollama_available,
     clean_translated_subtitle_text,
     default_output_srt,
@@ -22,6 +24,7 @@ from kotoba_standalone.translate.ollama import (
     resolve_output_srt,
     source_based_translation_override,
     sort_ollama_models_for_translation,
+    translate_text_ollama,
     translation_model_label,
 )
 from kotoba_standalone.translation_profiles import (
@@ -68,6 +71,9 @@ def test_sort_ollama_models_prioritizes_likely_translation_models() -> None:
     assert is_likely_translation_model("hf.co/mradermacher/translategemma-12b-it-GGUF:Q8_0")
     assert not is_likely_translation_model("hf.co/mradermacher/Hy-MT2-1.8B-GGUF:Q4_K_M")
     assert not is_likely_translation_model("qwen3:14b")
+    assert is_likely_translation_model("hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M")
+    assert is_likely_translation_model("hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M")
+    assert translation_model_label("hf.co/mradermacher/Hy-MT3-1.8B-GGUF:Q4_K_M") == "실험용/비추천"
     assert translation_model_label("hf.co/mradermacher/Hy-MT2-1.8B-GGUF:Q4_K_M") == "실험용/비추천"
     assert format_ollama_model_choice("qwen3:14b").startswith("[번역 미확인]")
 
@@ -272,3 +278,95 @@ def test_assert_ollama_model_available_reports_missing_model(monkeypatch: pytest
 
     with pytest.raises(OllamaModelError, match="was not found"):
         assert_ollama_model_available(TranslationOptions(model="missing:model"))
+
+
+def test_build_user_prompt_leaves_non_hy_mt3_and_non_korean_unchanged() -> None:
+    sample = "[1] 恥ずかしいよ。"
+
+    assert build_user_prompt(
+        "hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M",
+        "japanese",
+        "korean",
+        True,
+        "polite",
+        sample,
+    ) == sample
+    assert build_user_prompt(
+        "hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M",
+        "japanese",
+        "english",
+        True,
+        "polite",
+        sample,
+    ) == sample
+
+
+@pytest.mark.parametrize(
+    ("korean_style", "batch_mode", "expected_fragment"),
+    [
+        ("polite", True, "존댓말(해요체, ~요/~세요)"),
+        ("polite", False, "존댓말(해요체, ~요/~세요)"),
+        ("banmal", True, "자연스러운 한국어 반말(~어/~야/~지)"),
+        ("banmal", False, "자연스러운 한국어 반말(~어/~야/~지)"),
+        ("strict-banmal", True, "존댓말 없이 모두 한국어 반말(~어/~야/~지)"),
+        ("strict-banmal", False, "존댓말 없이 한국어 반말(~어/~야/~지)"),
+    ],
+)
+def test_build_user_prompt_prepends_style_reminder_for_hy_mt3(
+    korean_style: str,
+    batch_mode: bool,
+    expected_fragment: str,
+) -> None:
+    sample = "[1] 恥ずかしいよ。" if batch_mode else "恥ずかしいよ。"
+
+    prompt = build_user_prompt(
+        "hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M",
+        "japanese",
+        "korean",
+        batch_mode,
+        korean_style,
+        sample,
+    )
+
+    assert expected_fragment in prompt
+    assert ("[N] 번호 형식" in prompt) is batch_mode
+    assert prompt.endswith(f"\n\n{sample}")
+
+
+def test_translate_text_ollama_sends_augmented_user_prompt_only_for_hy_mt3(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_payloads: list[dict[str, object]] = []
+
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({"message": {"content": "[1] 부끄러워요."}}).encode("utf-8")
+
+    def fake_urlopen(request: object, timeout: int = 0) -> FakeResponse:
+        del timeout
+        captured_payloads.append(json.loads(request.data.decode("utf-8")))  # type: ignore[attr-defined]
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    translate_text_ollama(
+        TranslationOptions(model="hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M", korean_style="polite"),
+        "[1] 恥ずかしいよ。",
+    )
+    translate_text_ollama(
+        TranslationOptions(model="hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M", korean_style="polite"),
+        "[1] 恥ずかしいよ。",
+    )
+
+    hy_mt3_user = captured_payloads[0]["messages"][1]["content"]  # type: ignore[index]
+    hy_mt2_user = captured_payloads[1]["messages"][1]["content"]  # type: ignore[index]
+    assert "존댓말(해요체, ~요/~세요)" in hy_mt3_user
+    assert "[1] 恥ずかしいよ。" in hy_mt3_user
+    assert hy_mt2_user == "[1] 恥ずかしいよ。"
+
