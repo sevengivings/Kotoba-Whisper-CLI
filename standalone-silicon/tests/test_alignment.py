@@ -74,3 +74,38 @@ def test_parse_srt_chunks_reads_utf8_sig_srt() -> None:
     chunks = parse_srt_chunks("\ufeff1\n00:00:01,000 --> 00:00:02,500\nこんにちは\n\n")
 
     assert chunks == [SubtitleChunk(1.0, 2.5, "こんにちは")]
+
+
+def test_align_chunks_with_whisperx_releases_memory_in_finally(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import types
+
+    calls: list[str] = []
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            empty_cache=lambda: calls.append("cuda_empty_cache"),
+            ipc_collect=lambda: calls.append("cuda_ipc_collect"),
+        ),
+        mps=types.SimpleNamespace(
+            empty_cache=lambda: calls.append("mps_empty_cache"),
+        ),
+        backends=types.SimpleNamespace(
+            mps=types.SimpleNamespace(is_available=lambda: True),
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "whisperx", FakeWhisperX)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(alignment, "_load_audio", lambda *args, **kwargs: "audio")
+    monkeypatch.setattr(alignment.gc, "collect", lambda: calls.append("gc") or 0)
+
+    align_chunks_with_whisperx(
+        [SubtitleChunk(1.0, 3.0, "こんにちは")],
+        tmp_path / "sample.wav",
+        language_code="ja",
+        device="mps",
+    )
+
+    assert calls == ["gc", "cuda_empty_cache", "cuda_ipc_collect", "mps_empty_cache"]

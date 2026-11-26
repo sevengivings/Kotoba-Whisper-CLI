@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import sys
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from kotoba_standalone.media import wav_duration_seconds
 from kotoba_standalone.mlx_transcriber import mlx_language_code
+from kotoba_standalone.qwen_transcriber import attach_unaligned_text
 from kotoba_standalone.transcriber import TranscriptionDependencyError, TranscriptionResult
 from kotoba_standalone.types import ProcessOptions
 
@@ -13,6 +15,7 @@ class Qwen3MlxTranscriber:
     def __init__(self, options: ProcessOptions) -> None:
         self.options = options
         self._session: Any | None = None
+        self._aligner: Any | None = None
         self._mlx: Any | None = None
         self.device_name = ""
         self.torch_version = ""
@@ -31,6 +34,14 @@ class Qwen3MlxTranscriber:
 
         dtype = _mlx_dtype(mx, self.options.model_dtype)
         self._session = Session(model=self.options.qwen_mlx_model_name, dtype=dtype)
+        self._aligner = None
+        if self.options.qwen_mlx_return_timestamps and self.options.qwen_aligner_model:
+            try:
+                from mlx_qwen3_asr.forced_aligner import ForcedAligner
+            except ImportError:
+                ForcedAligner = None
+            if ForcedAligner is not None:
+                self._aligner = ForcedAligner(model_path=self.options.qwen_aligner_model, dtype=dtype)
         self._mlx = mlx
         self.device_name = "mlx-gpu"
         self.torch_version = f"mlx {getattr(mlx, '__version__', 'unknown')}; mlx-qwen3-asr {_package_version('mlx-qwen3-asr')}"
@@ -38,31 +49,66 @@ class Qwen3MlxTranscriber:
     def transcribe(self, wav_path: str) -> TranscriptionResult:
         if self._session is None:
             raise RuntimeError("Transcriber is not loaded")
-        result = self._session.transcribe(
-            wav_path,
-            language=mlx_language_code(self.options.language),
-            return_chunks=True,
-            return_timestamps=self.options.qwen_mlx_return_timestamps,
-            verbose=False,
+        kwargs: dict[str, Any] = {
+            "language": mlx_language_code(self.options.language),
+            "return_chunks": True,
+            "return_timestamps": self.options.qwen_mlx_return_timestamps,
+            "verbose": False,
+        }
+        if self.options.qwen_mlx_return_timestamps:
+            aligner = self._aligner or self.options.qwen_aligner_model
+            if aligner:
+                kwargs["forced_aligner"] = aligner
+        result = self._session.transcribe(wav_path, **kwargs)
+        raw, word_timestamps_used = qwen_mlx_result_to_raw_with_meta(
+            result,
+            fallback_duration_s=wav_duration_seconds(wav_path),
         )
-        raw = qwen_mlx_result_to_raw(result, fallback_duration_s=wav_duration_seconds(wav_path))
         return TranscriptionResult(
             raw=raw,
             batch_size_used=1,
             device_name=self.device_name,
             torch_version=self.torch_version,
             torch_cuda_version=self.torch_cuda_version,
-            word_timestamps_used=self.options.qwen_mlx_return_timestamps,
+            word_timestamps_used=word_timestamps_used,
         )
+
+    def unload(self) -> None:
+        self._session = None
+        self._aligner = None
+        self._mlx = None
+        load_models_mod = sys.modules.get("mlx_qwen3_asr.load_models")
+        model_holder = getattr(load_models_mod, "_ModelHolder", None)
+        clear_fn = getattr(model_holder, "clear", None)
+        if callable(clear_fn):
+            clear_fn()
 
 
 def qwen_mlx_result_to_raw(result: Any, fallback_duration_s: float | None = None) -> dict[str, Any]:
+    raw, _ = qwen_mlx_result_to_raw_with_meta(result, fallback_duration_s=fallback_duration_s)
+    return raw
+
+
+def qwen_mlx_result_to_raw_with_meta(
+    result: Any,
+    fallback_duration_s: float | None = None,
+) -> tuple[dict[str, Any], bool]:
     text = _value(result, "text") or ""
     language = _value(result, "language")
-    chunks = qwen_mlx_chunks_to_raw_chunks(_value(result, "segments")) or qwen_mlx_chunks_to_raw_chunks(_value(result, "chunks"))
+    segments = qwen_mlx_chunks_to_raw_chunks(_value(result, "segments"))
+    if segments:
+        return (
+            {
+                "text": str(text),
+                "language": language,
+                "chunks": attach_unaligned_text(str(text), segments),
+            },
+            True,
+        )
+    chunks = qwen_mlx_chunks_to_raw_chunks(_value(result, "chunks"))
     if not chunks and text:
         chunks = [{"timestamp": [0.0, float(fallback_duration_s or 0.01)], "text": str(text).strip()}]
-    return {"text": str(text), "language": language, "chunks": chunks}
+    return {"text": str(text), "language": language, "chunks": chunks}, False
 
 
 def qwen_mlx_chunks_to_raw_chunks(items: Any) -> list[dict[str, Any]]:

@@ -82,7 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
     process.add_argument("--qwen-aligner-model", default="Qwen/Qwen3-ForcedAligner-0.6B", help=argparse.SUPPRESS)
     process.add_argument("--no-qwen-timestamps", dest="qwen_return_timestamps", action="store_false", help=argparse.SUPPRESS)
     process.add_argument("--qwen-mlx-model-name", default="Qwen/Qwen3-ASR-1.7B", help=argparse.SUPPRESS)
+    process.set_defaults(qwen_mlx_return_timestamps=True)
     process.add_argument("--qwen-mlx-timestamps", dest="qwen_mlx_return_timestamps", action="store_true", help=argparse.SUPPRESS)
+    process.add_argument("--no-qwen-mlx-timestamps", dest="qwen_mlx_return_timestamps", action="store_false", help=argparse.SUPPRESS)
+    process.add_argument("--diarize-speakers", action="store_true", help="Separate subtitles at detected speaker turns")
+    process.add_argument("--num-speakers", type=int, help="Known speaker count for diarization")
     process.add_argument("--mlx-model-path", default="models/kotoba-whisper-v2.2-mlx-q4", help=argparse.SUPPRESS)
     process.add_argument("--mlx-device", choices=("cpu", "gpu"), default="gpu", help=argparse.SUPPRESS)
     process.add_argument("--mlx-word-timestamps", action="store_true", help=argparse.SUPPRESS)
@@ -226,6 +230,8 @@ def run_process(args: argparse.Namespace) -> int:
         qwen_return_timestamps=args.qwen_return_timestamps,
         qwen_mlx_model_name=args.qwen_mlx_model_name,
         qwen_mlx_return_timestamps=args.qwen_mlx_return_timestamps,
+        diarize_speakers=args.diarize_speakers,
+        num_speakers=args.num_speakers,
         mlx_model_path=args.mlx_model_path,
         mlx_device=args.mlx_device,
         mlx_word_timestamps=args.mlx_word_timestamps,

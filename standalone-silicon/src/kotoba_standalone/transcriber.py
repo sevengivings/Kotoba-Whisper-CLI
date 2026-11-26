@@ -137,6 +137,10 @@ class KotobaTranscriber:
     def transcribe_raw(self, wav_path: str) -> dict[str, Any]:
         return self.transcribe(wav_path).raw
 
+    def unload(self) -> None:
+        self._pipe = None
+        self._torch = None
+
     def _transcribe_with_timestamp_mode(self, wav_path: str, batch_size: int, timestamp_mode: bool | str) -> Any:
         if self._pipe is None or self._torch is None:
             raise RuntimeError("Transcriber is not loaded")

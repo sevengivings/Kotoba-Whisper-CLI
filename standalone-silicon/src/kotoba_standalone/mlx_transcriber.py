@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +74,14 @@ class MlxKotobaTranscriber:
             torch_cuda_version=self.torch_cuda_version,
             word_timestamps_used=self.options.mlx_word_timestamps,
         )
+
+    def unload(self) -> None:
+        transcribe_mod = sys.modules.get("mlx_whisper.transcribe")
+        model_holder = getattr(transcribe_mod, "ModelHolder", None)
+        if model_holder is not None:
+            model_holder.model = None
+            model_holder.model_path = None
+        self._mlx_whisper = None
 
 
 def resolve_mlx_model_path(model_path: str) -> Path:

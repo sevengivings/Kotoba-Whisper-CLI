@@ -11,6 +11,7 @@ from kotoba_standalone.alignment import WhisperXAlignmentResult
 from kotoba_standalone.media import SilenceSpan
 from kotoba_standalone.pipeline import process_video, tail_retranscribe_long_subtitles, validate_silence_threshold
 from kotoba_standalone.pyannote_vad import PyannoteVadDependencyError, PyannoteVadResult
+from kotoba_standalone.speaker_diarization import SpeakerDiarizationResult, SpeakerTurn
 from kotoba_standalone.subtitle import SubtitleChunk, SubtitleQualityIssue
 from kotoba_standalone.transcriber import TranscriptionDependencyError
 from kotoba_standalone.types import ProcessOptions, ProgressEvent
@@ -203,7 +204,8 @@ def test_process_video_uses_qwen_mlx_backend_metadata(tmp_path: Path, monkeypatc
     process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
     assert process_meta["asr_backend"] == "qwen3-mlx"
     assert process_meta["asr_model"] == "Qwen/Qwen3-ASR-0.6B"
-    assert process_meta["qwen_mlx_return_timestamps"] is False
+    assert process_meta["qwen_mlx_return_timestamps"] is True
+    assert process_meta["qwen_aligner_model"] == "Qwen/Qwen3-ForcedAligner-0.6B"
 
 
 def test_process_video_can_write_whisperx_aligned_subtitles(
@@ -557,3 +559,265 @@ def test_tail_retranscribe_rejects_too_short_tail_text(tmp_path: Path, monkeypat
     assert refined == [chunk]
     assert applied == []
     assert attempts[0]["accepted"] is False
+
+
+def test_process_video_unloads_transcriber_and_releases_vram_before_translation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class FakeTranscriber:
+        def __init__(self, options: ProcessOptions) -> None:
+            self.options = options
+
+        def load(self) -> None:
+            events.append("load")
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            del wav_path
+            events.append("transcribe")
+            return FakeResult()
+
+        def unload(self) -> None:
+            events.append("unload")
+
+    class FakeTranslation:
+        output_srt = tmp_path / "out" / "ja_short_test.ko.srt"
+
+    def fake_release_gpu_memory(transcriber: object | None = None) -> None:
+        if transcriber is not None:
+            transcriber.unload()  # type: ignore[attr-defined]
+        events.append("release_gpu_memory")
+
+    def fake_translate_srt(*args: object, **kwargs: object) -> FakeTranslation:
+        del args, kwargs
+        events.append("translate")
+        FakeTranslation.output_srt.write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nannyeonghaseyo\n",
+            encoding="utf-8",
+        )
+        return FakeTranslation()
+
+    source_media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    media = tmp_path / "media" / "ja_short_test.mp4"
+    media.parent.mkdir()
+    shutil.copy2(source_media, media)
+    monkeypatch.setattr(pipeline, "FasterKotobaTranscriber", FakeTranscriber)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
+    monkeypatch.setattr(pipeline, "release_gpu_memory", fake_release_gpu_memory)
+    monkeypatch.setattr(pipeline, "translate_srt", fake_translate_srt)
+
+    result = process_video(
+        media,
+        ProcessOptions(output_dir=tmp_path / "out", vad_engine="ffmpeg", translate=True),
+    )
+
+    assert result.status == "success"
+    assert events == [
+        "load",
+        "transcribe",
+        "unload",
+        "release_gpu_memory",
+        "release_gpu_memory",
+        "translate",
+    ]
+
+
+def test_release_gpu_memory_calls_unload_gc_mlx_mps_and_cuda_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+    import types
+
+    calls: list[str] = []
+
+    class FakeTranscriber:
+        def unload(self) -> None:
+            calls.append("unload")
+
+    fake_mx = types.SimpleNamespace(
+        clear_cache=lambda: calls.append("mlx_clear_cache"),
+    )
+    fake_cuda = types.SimpleNamespace(
+        is_available=lambda: True,
+        empty_cache=lambda: calls.append("cuda_empty_cache"),
+        ipc_collect=lambda: calls.append("cuda_ipc_collect"),
+    )
+    fake_mps = types.SimpleNamespace(
+        empty_cache=lambda: calls.append("mps_empty_cache"),
+    )
+    fake_backends = types.SimpleNamespace(
+        mps=types.SimpleNamespace(is_available=lambda: True),
+    )
+    fake_torch = types.SimpleNamespace(cuda=fake_cuda, mps=fake_mps, backends=fake_backends)
+    monkeypatch.setitem(sys.modules, "mlx.core", fake_mx)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(pipeline.gc, "collect", lambda: calls.append("gc") or 0)
+
+    pipeline.release_gpu_memory(FakeTranscriber())
+
+    assert calls == [
+        "unload",
+        "gc",
+        "mlx_clear_cache",
+        "cuda_empty_cache",
+        "cuda_ipc_collect",
+        "mps_empty_cache",
+    ]
+
+
+def test_release_gpu_memory_falls_back_to_mlx_metal_clear_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+    import types
+
+    calls: list[str] = []
+    fake_mx = types.SimpleNamespace(
+        metal=types.SimpleNamespace(clear_cache=lambda: calls.append("mlx_metal_clear_cache")),
+    )
+    monkeypatch.setitem(sys.modules, "mlx.core", fake_mx)
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    monkeypatch.setattr(pipeline.gc, "collect", lambda: calls.append("gc") or 0)
+
+    pipeline.release_gpu_memory()
+
+    assert calls == ["gc", "mlx_metal_clear_cache"]
+
+
+def test_process_video_splits_subtitles_at_speaker_turns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeQwenMlxTranscriber:
+        def __init__(self, options: ProcessOptions) -> None:
+            self.options = options
+
+        def load(self) -> None:
+            return None
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            del wav_path
+            result = FakeResult()
+            result.raw = {
+                "chunks": [
+                    {"timestamp": [0.0, 0.4], "text": "hello"},
+                    {"timestamp": [0.5, 0.9], "text": "there"},
+                ]
+            }
+            result.word_timestamps_used = True
+            return result
+
+    media = Path(__file__).parents[2] / "sample" / "ja_short_test.mp4"
+    monkeypatch.setattr(pipeline, "Qwen3MlxTranscriber", FakeQwenMlxTranscriber)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [])
+    monkeypatch.setattr(
+        pipeline,
+        "diarize_speakers_pyannote",
+        lambda *args, **kwargs: SpeakerDiarizationResult(
+            turns=[
+                SpeakerTurn(0.0, 0.45, "SPEAKER_00"),
+                SpeakerTurn(0.45, 1.0, "SPEAKER_01"),
+            ],
+            model="test model",
+            embedding="test embedding",
+            speaker_count=2,
+        ),
+    )
+
+    result = process_video(
+        media,
+        ProcessOptions(
+            output_dir=tmp_path / "out",
+            vad_engine="ffmpeg",
+            asr_backend="qwen3-mlx",
+            diarize_speakers=True,
+        ),
+    )
+
+    assert result.status == "success"
+    srt = (tmp_path / "out" / "ja_short_test.ja.srt").read_text(encoding="utf-8")
+    assert "hello\n\n2\n" in srt
+    assert "there" in srt
+    report = json.loads((tmp_path / "out" / "ja_short_test.speakers.json").read_text(encoding="utf-8"))
+    assert report["applied_to_subtitles"] is True
+    assert [item["speaker"] for item in report["subtitles"]] == ["SPEAKER_00", "SPEAKER_01"]
+
+
+def test_speaker_diarization_falls_back_when_segment_lacks_word_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeTranscriber:
+        calls = 0
+
+        def __init__(self, options: ProcessOptions) -> None:
+            self.options = options
+
+        def load(self) -> None:
+            return None
+
+        def transcribe(self, wav_path: str) -> FakeResult:
+            del wav_path
+            FakeTranscriber.calls += 1
+            result = FakeResult(0.1, 0.4, f"word {FakeTranscriber.calls}")
+            result.word_timestamps_used = FakeTranscriber.calls == 1
+            return result
+
+    media = tmp_path / "media" / "ja_short_test.mp4"
+    media.parent.mkdir()
+    shutil.copy2(Path(__file__).parents[2] / "sample" / "ja_short_test.mp4", media)
+
+    class FakeTranslation:
+        output_srt = tmp_path / "out" / "ja_short_test.ko.srt"
+
+    def fake_translate_srt(*args: object, **kwargs: object) -> FakeTranslation:
+        del args, kwargs
+        FakeTranslation.output_srt.write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\ntranslation\n",
+            encoding="utf-8",
+        )
+        return FakeTranslation()
+
+    monkeypatch.setattr(pipeline, "FasterKotobaTranscriber", FakeTranscriber)
+    monkeypatch.setattr(pipeline, "translate_srt", fake_translate_srt)
+    monkeypatch.setattr(pipeline, "detect_silences", lambda *args: [SilenceSpan(1.0, 2.0)])
+    monkeypatch.setattr(
+        pipeline,
+        "speech_spans_from_silences",
+        lambda *args: [SilenceSpan(0.0, 1.0), SilenceSpan(2.0, 3.0)],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "diarize_speakers_pyannote",
+        lambda *args, **kwargs: SpeakerDiarizationResult(
+            turns=[SpeakerTurn(0.0, 3.0, "SPEAKER_00")],
+            model="test model",
+            embedding="test embedding",
+            speaker_count=1,
+        ),
+    )
+
+    result = process_video(
+        media,
+        ProcessOptions(
+            output_dir=tmp_path / "out",
+            vad_engine="ffmpeg",
+            diarize_speakers=True,
+            translate=True,
+        ),
+    )
+
+    assert result.status == "success"
+    assert result.ja_srt_path is not None and result.ja_srt_path.exists()
+    source_subtitles = result.ja_srt_path.read_text(encoding="utf-8")
+    assert "word 1" in source_subtitles and "word 2" in source_subtitles
+    assert result.ko_srt_path == FakeTranslation.output_srt
+    assert result.copied_ko_srt_path == media.with_suffix(".srt")
+    assert "speaker-aware subtitle grouping skipped" in result.message
+    process_meta = json.loads((tmp_path / "out" / "ja_short_test.process.json").read_text(encoding="utf-8"))
+    assert process_meta["missing_word_timestamp_segment_count"] == 1
+    assert process_meta["missing_word_timestamp_segments"] == [2]
+    assert process_meta["speaker_grouping_applied"] is False
+    report = json.loads((tmp_path / "out" / "ja_short_test.speakers.json").read_text(encoding="utf-8"))
+    assert report["applied_to_subtitles"] is False
+    assert all(item["speaker"] is None for item in report["subtitles"])

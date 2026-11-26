@@ -1017,7 +1017,7 @@ qwen = [
     { name = "qwen-asr" },
 ]
 qwen-mlx = [
-    { name = "mlx-qwen3-asr" },
+    { name = "mlx-qwen3-asr", extra = ["aligner"] },
 ]
 torch = [
     { name = "torch" },
@@ -1049,7 +1049,7 @@ pyannote = [
     { name = "speechbrain", specifier = "==1.0.3" },
 ]
 qwen = [{ name = "qwen-asr", specifier = ">=0.0.6" }]
-qwen-mlx = [{ name = "mlx-qwen3-asr", specifier = ">=0.3.5,<0.4" }]
+qwen-mlx = [{ name = "mlx-qwen3-asr", extras = ["aligner"], specifier = ">=0.3.5,<0.4" }]
 torch = [
     { name = "torch", specifier = "==2.7.1" },
     { name = "torchaudio", specifier = "==2.7.1" },
@@ -1295,6 +1295,12 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3d/c2/b53450ad34ec4960bbb108701e8268e109c12b9888b101ea22f94897ffb5/mlx_qwen3_asr-0.3.5.tar.gz", hash = "sha256:3b2932a6cc5e162d8a686434ee0ea63e86a294c845451496729a6f0f6a0df050", size = 244181, upload-time = "2026-05-16T00:26:23.504Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7d/65/a450105650127e28c4467f834c8e71cdca422e62efa4161919bb1d94cd36/mlx_qwen3_asr-0.3.5-py3-none-any.whl", hash = "sha256:5c7169392a8d06f38ccc791b768cdc9e7fd6038a34130576c2af8b3afa28d06b", size = 168041, upload-time = "2026-05-16T00:26:21.879Z" },
+]
+
+[package.optional-dependencies]
+aligner = [
+    { name = "nagisa" },
+    { name = "soynlp" },
 ]
 
 [[package]]
@@ -2689,8 +2695,8 @@ dependencies = [
     { name = "numpy" },
     { name = "psutil" },
     { name = "scikit-learn" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and extra == 'group-25-kotoba-standalone-silicon-qwen') or (extra == 'group-25-kotoba-standalone-silicon-qwen' and extra == 'group-25-kotoba-standalone-silicon-transcribe')" },
-    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'group-25-kotoba-standalone-silicon-qwen') or (extra == 'group-25-kotoba-standalone-silicon-qwen' and extra == 'group-25-kotoba-standalone-silicon-transcribe')" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-25-kotoba-standalone-silicon-qwen' and extra == 'group-25-kotoba-standalone-silicon-transcribe')" },
+    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'group-25-kotoba-standalone-silicon-qwen' and extra == 'group-25-kotoba-standalone-silicon-transcribe')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7d/05/fb3f0c9248e60a0224e77198c31517b93b92d6060873b641caf474d42993/soynlp-0.0.493.tar.gz", hash = "sha256:4b20b825edbcadb9ebd494de54d8ca50b0ee317fe58d090e8b509d733422136a", size = 405393, upload-time = "2019-08-25T05:28:00.755Z" }
 wheels = [

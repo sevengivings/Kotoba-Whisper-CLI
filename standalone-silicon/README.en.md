@@ -150,12 +150,47 @@ uv run --no-sync kotoba process ../sample/ja_short_test.mp4 \
   --qwen-mlx-model-name Qwen/Qwen3-ASR-0.6B
 ```
 
-## Translation
+By default, Qwen3-ASR MLX also extracts word-level timestamps using `Qwen/Qwen3-ForcedAligner-0.6B` so subtitles split into short cues instead of long VAD spans (pass `--no-qwen-mlx-timestamps` to disable).
 
-After installing Ollama and pulling a translation model:
+### Qwen Speaker-Aware Subtitles
+
+In the GUI, selecting `Qwen3-ASR 0.6B MLX (고속실험)` or `Qwen3-ASR 1.7B MLX` enables speaker diarization by default. You can choose `자동`, `2명`, `3명`, `4명`, or `5명` for `화자 분리 인원`, and both the checkbox state and speaker count are saved. Other engines do not provide reliable word timestamps in this workflow, so GUI speaker diarization is active only for Qwen3 engines.
+
+From the CLI, pass `--diarize-speakers` (and optionally `--num-speakers`; omit it for automatic estimation):
 
 ```bash
-ollama pull hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
+uv run --no-sync kotoba process ../sample/ja_short_test.mp4 \
+  --output-dir ./tmp-output \
+  --asr-backend qwen3-mlx \
+  --model-device mps \
+  --diarize-speakers \
+  --num-speakers 3 \
+  --translate
+```
+
+Subtitles are split when the detected speaker changes without printing speaker labels into the SRT text. Detected speaker turns and per-subtitle speaker assignments are written to `*.speakers.json`. Accurate speaker splits require word timestamps; overlapping speech or very short interjections may still be misattributed.
+
+Diarization uses the bundled `pyannote/segmentation-3.0` checkpoint and `pyannote/wespeaker-voxceleb-resnet34-LM`, downloading the speaker embedding model and `Qwen/Qwen3-ForcedAligner-0.6B` on first use.
+
+## Translation
+
+Install Ollama and pull a recommended `Hy-MT3` model for your Apple Silicon unified memory (existing `Hy-MT2` models remain supported):
+
+| Use case | Model | Ollama size | Unified memory starting point |
+| --- | --- | ---: | --- |
+| Best quality & speed (32GB+ unified memory) | `hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M` | 18GB | 32GB+ Mac recommended (3B active MoE; unsupported on 8/16GB, tight on 24GB) |
+| Balanced / default recommended (16GB+ unified memory) | `hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M` | 4.6GB | 16GB+ Mac recommended (~5.3GB GPU footprint; 8GB Macs may hit memory pressure) |
+
+- **Automatic unified/GPU memory release before translation**: After ASR and optional WhisperX alignment finish, `standalone-silicon` unloads those models and clears MLX and PyTorch (MPS/CUDA) caches before invoking Ollama, freeing unified memory for one-shot translation runs.
+- **Hy-MT3 speech-style prompt handling**: Because `Hy-MT3` tends to ignore `polite` / `banmal` style instructions placed only in the `system` prompt (often defaulting to casual Korean), `standalone-silicon` automatically mirrors the selected Korean speech-style instruction (`polite`, `banmal`, or `strict-banmal`) into the `user` prompt whenever an `hy-mt3` model is used.
+
+```bash
+# 32GB+ unified memory Mac (best quality & speed, 3B active MoE)
+ollama pull hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M
+
+# 16GB unified memory Mac (verified on Apple M1 16GB)
+ollama pull hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M
+
 uv run --no-sync kotoba process ../sample/ja_short_test.mp4 --translate
 ```
 

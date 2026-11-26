@@ -24,11 +24,14 @@ OLLAMA_OPTIONS = {
 }
 
 RECOMMENDED_TRANSLATION_MODEL_KEYWORDS = (
+    "hy-mt3-30b",
+    "hy-mt3-7b",
     "hy-mt2-30b",
     "hy-mt2-7b",
     "translategemma",
 )
 DISCOURAGED_TRANSLATION_MODEL_KEYWORDS = (
+    "hy-mt3-1.8b",
     "hy-mt2-1.8b",
 )
 
@@ -380,7 +383,15 @@ def make_batches(texts: list[str], batch_size: int, text_split_size: int) -> lis
 
 def translate_text_ollama(options: TranslationOptions, text: str) -> str:
     url = f"http://{options.ollama_host}:{options.ollama_port}/api/chat"
-    batch_mode = "\n" in text or re.match(r"^\[\d+\]\s+", text.strip())
+    batch_mode = bool("\n" in text or re.match(r"^\[\d+\]\s+", text.strip()))
+    user_prompt = build_user_prompt(
+        options.model,
+        options.source,
+        options.target,
+        batch_mode,
+        options.korean_style,
+        text,
+    )
     payload = {
         "model": options.model,
         "messages": [
@@ -395,7 +406,7 @@ def translate_text_ollama(options: TranslationOptions, text: str) -> str:
                     text,
                 ),
             },
-            {"role": "user", "content": text},
+            {"role": "user", "content": user_prompt},
         ],
         "stream": False,
         "options": OLLAMA_OPTIONS,
@@ -444,6 +455,39 @@ def build_system_prompt(
         "Ensure the translation is natural and conversational. "
         "Do not include any introductory, concluding remarks, or notes. Output only the translated text."
     )
+
+
+def uses_user_style_prompt(model: str) -> bool:
+    return "hy-mt3" in model.strip().lower()
+
+
+def build_user_prompt(
+    model: str,
+    source_lang: str,
+    target_lang: str,
+    batch_mode: bool,
+    korean_style: str,
+    text: str,
+) -> str:
+    if not uses_user_style_prompt(model) or target_lang.strip().lower() not in {"ko", "kor", "korean", "kr"}:
+        return text
+    source_label = "일본어 자막" if source_lang.strip().lower() in {"ja", "jp", "jpn", "japanese"} else "자막"
+    if batch_mode:
+        headers = {
+            "polite": f"다음 {source_label}을 모두 자연스러운 한국어 존댓말(해요체, ~요/~세요)로 번역하세요. [N] 번호 형식을 유지하고 번역문만 출력하세요:",
+            "banmal": f"다음 {source_label}을 자연스러운 한국어 반말(~어/~야/~지)로 번역하세요. [N] 번호 형식을 유지하고 번역문만 출력하세요:",
+            "strict-banmal": f"다음 {source_label}을 존댓말 없이 모두 한국어 반말(~어/~야/~지)로 번역하세요. [N] 번호 형식을 유지하고 번역문만 출력하세요:",
+        }
+    else:
+        headers = {
+            "polite": f"다음 {source_label}을 자연스러운 한국어 존댓말(해요체, ~요/~세요)로 번역하고 번역문만 출력하세요:",
+            "banmal": f"다음 {source_label}을 자연스러운 한국어 반말(~어/~야/~지)로 번역하고 번역문만 출력하세요:",
+            "strict-banmal": f"다음 {source_label}을 존댓말 없이 한국어 반말(~어/~야/~지)로 번역하고 번역문만 출력하세요:",
+        }
+    header = headers.get(korean_style)
+    if header is None:
+        raise RuntimeError("--korean-style must be polite, banmal, or strict-banmal")
+    return f"{header}\n\n{text}"
 
 
 def build_translation_profile_prompt(

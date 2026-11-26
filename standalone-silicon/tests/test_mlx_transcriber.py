@@ -69,3 +69,21 @@ def test_mlx_transcriber_converts_segments_to_raw_chunks(tmp_path: Path, monkeyp
     assert result.device_name == "mlx-gpu"
     assert result.batch_size_used == 1
     assert not result.word_timestamps_used
+
+
+def test_mlx_transcriber_unload_clears_model_holder_and_reference(monkeypatch) -> None:
+    class FakeModelHolder:
+        model = object()
+        model_path = "/tmp/model"
+
+    fake_transcribe_mod = types.ModuleType("mlx_whisper.transcribe")
+    fake_transcribe_mod.ModelHolder = FakeModelHolder  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlx_whisper.transcribe", fake_transcribe_mod)
+
+    transcriber = MlxKotobaTranscriber(ProcessOptions(asr_backend="kotoba-mlx"))
+    transcriber._mlx_whisper = types.ModuleType("mlx_whisper")
+    transcriber.unload()
+
+    assert transcriber._mlx_whisper is None
+    assert FakeModelHolder.model is None
+    assert FakeModelHolder.model_path is None

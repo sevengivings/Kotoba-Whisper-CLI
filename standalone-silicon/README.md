@@ -165,12 +165,47 @@ uv run --no-sync kotoba process ../sample/ja_short_test.mp4 \
   --qwen-mlx-model-name Qwen/Qwen3-ASR-0.6B
 ```
 
-## 번역
+Qwen3-ASR MLX는 기본적으로 `Qwen/Qwen3-ForcedAligner-0.6B`를 사용해 단어별 타임스탬프를 함께 추출하므로 자막이 문장/호흡 단위로 짧게 나뉩니다(끄려면 `--no-qwen-mlx-timestamps`).
 
-Ollama를 설치하고 번역 모델을 받은 뒤:
+### Qwen 화자 분리 자막
+
+GUI에서 `Qwen3-ASR 0.6B MLX (고속실험)` 또는 `Qwen3-ASR 1.7B MLX`를 선택하면 화자 분리가 기본으로 켜집니다. `화자 분리 인원`은 `자동`, `2명`, `3명`, `4명`, `5명` 중 선택할 수 있고, 체크 상태와 인원 선택은 저장됩니다. Kotoba v2.2 MLX / faster CPU / MPS 경로는 단어별 타임스탬프를 안정적으로 반환하지 않아 GUI 화자 분리는 Qwen3 엔진에서만 활성화됩니다.
+
+CLI에서는 다음 옵션을 직접 지정합니다. `--num-speakers`를 생략하면 인원은 자동 추정합니다.
 
 ```bash
-ollama pull hf.co/mradermacher/Hy-MT2-7B-GGUF:Q4_K_M
+uv run --no-sync kotoba process ../sample/ja_short_test.mp4 \
+  --output-dir ./tmp-output \
+  --asr-backend qwen3-mlx \
+  --model-device mps \
+  --diarize-speakers \
+  --num-speakers 3 \
+  --translate
+```
+
+화자가 바뀔 때 자막을 나누며, SRT에는 화자 번호를 표시하지 않습니다. 감지된 화자 구간과 각 자막의 화자 번호는 `*.speakers.json`에 저장됩니다. 정확한 자막 분할에는 단어별 시간 정보가 필요합니다. 동시에 말하는 구간이나 짧은 감탄사의 화자는 틀릴 수 있습니다.
+
+사용하는 모델은 번들된 `pyannote/segmentation-3.0`과 공개된 `pyannote/wespeaker-voxceleb-resnet34-LM`입니다. 첫 실행 시 화자 음색 모델과 `Qwen/Qwen3-ForcedAligner-0.6B`를 다운로드합니다.
+
+## 번역
+
+Ollama를 설치한 뒤 Apple Silicon 통합 메모리(RAM)에 맞는 권장 `Hy-MT3` 모델을 받습니다(기존 `Hy-MT2` 모델도 계속 지원합니다).
+
+| 용도 | 모델 | Ollama 크기 | 통합 메모리 시작점 |
+| --- | --- | ---: | --- |
+| 품질·속도 우선 (32GB+ 통합 메모리) | `hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M` | 18GB | 32GB 이상 Mac 권장 (MoE 활성 3B, 8/16GB 불가·24GB 빠듯함) |
+| 균형·기본 권장 (16GB+ 통합 메모리) | `hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M` | 4.6GB | 16GB 이상 Mac 권장 (실측 ~5.3GB GPU 점유, 8GB는 메모리 부족 가능) |
+
+- **ASR 완료 후 통합 메모리 자동 해제**: `standalone-silicon`은 전사(ASR) 및 WhisperX 정렬이 끝난 직후 Ollama 번역을 호출하기 전에 로드된 전사/정렬 모델을 언로드하고 MLX 및 PyTorch(MPS/CUDA) 캐시를 자동으로 해제합니다. 덕분에 원스톱 실행에서도 번역 모델이 사용할 통합 메모리를 최대한 확보할 수 있습니다.
+- **Hy-MT3 문체(존댓말/반말) 보정**: `Hy-MT3` 계열 모델은 `system` 프롬프트에 넣은 문체 지시만으로는 존댓말(`polite`) 설정에서도 반말로 출력되는 경향이 있습니다. `standalone-silicon`은 모델 이름에 `hy-mt3`가 포함된 경우 `user` 프롬프트에도 한국어 문체 지시(`polite` / `banmal` / `strict-banmal`)를 함께 전달해 의도한 말투를 유지하도록 자동 보정합니다.
+
+```bash
+# 32GB 이상 통합 메모리 Mac (품질·속도 우선, MoE 활성 3B)
+ollama pull hf.co/mradermacher/Hy-MT3-30B-A3B-i1-GGUF:Q4_K_M
+
+# 16GB 통합 메모리 Mac (Apple M1 16GB 실측 검증)
+ollama pull hf.co/mradermacher/Hy-MT3-7B-i1-GGUF:Q4_K_M
+
 uv run --no-sync kotoba process ../sample/ja_short_test.mp4 --translate
 ```
 
